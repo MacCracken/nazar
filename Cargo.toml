@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nazar-core",
+    "crates/nazar-api",
+    "crates/nazar-ui",
+    "crates/nazar-ai",
+    "crates/nazar-mcp",
+]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+reqwest = { version = "0.12", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+egui = "0.33"
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
+axum = "0.8"
+
+[package]
+name = "nazar"
+version = "2026.3.16"
+edition = "2024"
+description = "AI-native system monitor for AGNOS"
+license = "GPL-3.0"
+
+[dependencies]
+nazar-core = { path = "crates/nazar-core" }
+nazar-api = { path = "crates/nazar-api" }
+nazar-ui = { path = "crates/nazar-ui" }
+nazar-ai = { path = "crates/nazar-ai" }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[bin]]
+name = "nazar"
+path = "src/main.rs"

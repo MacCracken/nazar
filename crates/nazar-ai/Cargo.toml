@@ -1,0 +1,14 @@
+[package]
+name = "nazar-ai"
+version = "2026.3.16"
+edition = "2024"
+description = "AI-powered analysis for Nazar system monitor"
+license = "GPL-3.0"
+
+[dependencies]
+nazar-core = { path = "../nazar-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

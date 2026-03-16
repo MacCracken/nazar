@@ -1,0 +1,17 @@
+[package]
+name = "nazar-ui"
+version = "2026.3.16"
+edition = "2024"
+description = "GUI for Nazar system monitor (egui/eframe)"
+license = "GPL-3.0"
+
+[dependencies]
+nazar-core = { path = "../nazar-core" }
+nazar-api = { path = "../nazar-api" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

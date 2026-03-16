@@ -1,0 +1,16 @@
+[package]
+name = "nazar-api"
+version = "2026.3.16"
+edition = "2024"
+description = "API client for Nazar — connects to daimon and system metrics"
+license = "GPL-3.0"
+
+[dependencies]
+nazar-core = { path = "../nazar-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
