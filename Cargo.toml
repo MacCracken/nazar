@@ -23,6 +23,8 @@ clap = { version = "4", features = ["derive"] }
 egui = "0.33"
 eframe = { version = "0.33", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 axum = "0.8"
+libc = "0.2"
+egui_plot = "0.34"
 
 [package]
 name = "nazar"
@@ -36,10 +38,14 @@ nazar-core = { path = "crates/nazar-core" }
 nazar-api = { path = "crates/nazar-api" }
 nazar-ui = { path = "crates/nazar-ui" }
 nazar-ai = { path = "crates/nazar-ai" }
+nazar-mcp = { path = "crates/nazar-mcp" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
 
 [[bin]]
 name = "nazar"

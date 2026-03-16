@@ -1,7 +1,7 @@
 //! Nazar AI — anomaly detection, resource prediction, and recommendations
 
-use nazar_core::*;
 use chrono::Utc;
+use nazar_core::*;
 
 /// Simple threshold-based anomaly detector for system metrics.
 pub struct AnomalyDetector {
@@ -99,10 +99,9 @@ impl AnomalyDetector {
 
         let (slope, intercept) = linear_regression(&points)?;
         if slope <= 0.0 {
-            return None; // usage is decreasing
+            return None;
         }
 
-        // When will usage hit 95%?
         let target = 95.0;
         let steps_to_target = (target - intercept) / slope;
         let intervals = steps_to_target as u64;
@@ -112,7 +111,11 @@ impl AnomalyDetector {
             current_value: points.last().map(|p| p.1).unwrap_or(0.0),
             predicted_value: target,
             intervals_until: intervals,
-            trend: if slope > 0.5 { Trend::Rising } else { Trend::Stable },
+            trend: if slope > 0.5 {
+                Trend::Rising
+            } else {
+                Trend::Stable
+            },
         })
     }
 }
@@ -123,50 +126,8 @@ impl Default for AnomalyDetector {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Alert {
-    pub severity: AlertSeverity,
-    pub component: String,
-    pub message: String,
-    pub timestamp: chrono::DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AlertSeverity {
-    Info,
-    Warning,
-    Critical,
-}
-
-impl std::fmt::Display for AlertSeverity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Info => write!(f, "INFO"),
-            Self::Warning => write!(f, "WARNING"),
-            Self::Critical => write!(f, "CRITICAL"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PredictionResult {
-    pub metric: String,
-    pub current_value: f64,
-    pub predicted_value: f64,
-    /// How many polling intervals until the predicted value is reached.
-    pub intervals_until: u64,
-    pub trend: Trend,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Trend {
-    Rising,
-    Stable,
-    Falling,
-}
-
 /// Simple linear regression: returns (slope, intercept) for y = slope*x + intercept.
-fn linear_regression(points: &[(f64, f64)]) -> Option<(f64, f64)> {
+pub fn linear_regression(points: &[(f64, f64)]) -> Option<(f64, f64)> {
     let n = points.len() as f64;
     if n < 2.0 {
         return None;
@@ -263,7 +224,7 @@ mod tests {
     #[test]
     fn anomaly_detector_disk_alert() {
         let mut detector = AnomalyDetector::new();
-        detector.set_thresholds(90.0, 85.0, 40.0); // Low disk threshold
+        detector.set_thresholds(90.0, 85.0, 40.0);
         let snap = sample_snapshot(50.0, 8_000_000_000, 16_000_000_000);
         let alerts = detector.check(&snap);
         assert!(alerts.iter().any(|a| a.component.starts_with("disk:")));
@@ -305,7 +266,6 @@ mod tests {
     #[test]
     fn predict_rising_memory() {
         let mut detector = AnomalyDetector::new();
-        // Simulate rising memory usage: 60% -> 80% over 20 snapshots
         for i in 0..20 {
             let used_pct = 60.0 + (i as f64);
             let used_bytes = (used_pct / 100.0 * 16_000_000_000.0) as u64;
@@ -316,12 +276,5 @@ mod tests {
         let pred = pred.unwrap();
         assert_eq!(pred.metric, "memory");
         assert!(pred.intervals_until > 0);
-    }
-
-    #[test]
-    fn alert_severity_display() {
-        assert_eq!(AlertSeverity::Info.to_string(), "INFO");
-        assert_eq!(AlertSeverity::Warning.to_string(), "WARNING");
-        assert_eq!(AlertSeverity::Critical.to_string(), "CRITICAL");
     }
 }

@@ -3,9 +3,14 @@
 //! Named after the Arabic/Persian نظر (watchful eye).
 
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+// ---------------------------------------------------------------------------
+// System metrics
+// ---------------------------------------------------------------------------
 
 /// A point-in-time system metrics snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +165,56 @@ pub struct AnomalyAlert {
     pub timestamp: DateTime<Utc>,
 }
 
+// ---------------------------------------------------------------------------
+// Alert types (used by nazar-ai, HTTP API, MCP, UI)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Alert {
+    pub severity: AlertSeverity,
+    pub component: String,
+    pub message: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AlertSeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+impl std::fmt::Display for AlertSeverity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Info => write!(f, "INFO"),
+            Self::Warning => write!(f, "WARNING"),
+            Self::Critical => write!(f, "CRITICAL"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PredictionResult {
+    pub metric: String,
+    pub current_value: f64,
+    pub predicted_value: f64,
+    /// How many polling intervals until the predicted value is reached.
+    pub intervals_until: u64,
+    pub trend: Trend,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Trend {
+    Rising,
+    Stable,
+    Falling,
+}
+
+// ---------------------------------------------------------------------------
+// Time series
+// ---------------------------------------------------------------------------
+
 /// A time-series data point for charting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataPoint {
@@ -215,7 +270,17 @@ impl TimeSeries {
     pub fn max(&self) -> Option<f64> {
         self.points.iter().map(|p| p.value).reduce(f64::max)
     }
+
+    /// Return the last `n` values (for sparklines / charts).
+    pub fn last_n(&self, n: usize) -> Vec<f64> {
+        let start = self.points.len().saturating_sub(n);
+        self.points[start..].iter().map(|p| p.value).collect()
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
 
 /// Nazar configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,6 +311,62 @@ impl Default for NazarConfig {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Shared monitor state
+// ---------------------------------------------------------------------------
+
+/// Shared application state written by the collector and read by UI/API/MCP.
+pub struct MonitorState {
+    pub latest: Option<SystemSnapshot>,
+    pub alerts: Vec<Alert>,
+    pub predictions: Vec<PredictionResult>,
+    pub cpu_history: TimeSeries,
+    pub mem_history: TimeSeries,
+    pub disk_history: HashMap<String, TimeSeries>,
+    pub net_rx_history: TimeSeries,
+    pub net_tx_history: TimeSeries,
+    pub config: NazarConfig,
+    pub started_at: DateTime<Utc>,
+}
+
+impl MonitorState {
+    pub fn new(config: NazarConfig) -> Self {
+        let max = config.max_history_points;
+        Self {
+            latest: None,
+            alerts: Vec::new(),
+            predictions: Vec::new(),
+            cpu_history: TimeSeries::new("CPU", "%", max),
+            mem_history: TimeSeries::new("Memory", "%", max),
+            disk_history: HashMap::new(),
+            net_rx_history: TimeSeries::new("Net RX", "B/s", max),
+            net_tx_history: TimeSeries::new("Net TX", "B/s", max),
+            config,
+            started_at: Utc::now(),
+        }
+    }
+
+    /// Cap alerts to the most recent 100.
+    pub fn push_alerts(&mut self, new_alerts: Vec<Alert>) {
+        self.alerts.extend(new_alerts);
+        if self.alerts.len() > 100 {
+            let drain = self.alerts.len() - 100;
+            self.alerts.drain(..drain);
+        }
+    }
+}
+
+/// Thread-safe handle to shared monitor state.
+pub type SharedState = Arc<RwLock<MonitorState>>;
+
+pub fn new_shared_state(config: NazarConfig) -> SharedState {
+    Arc::new(RwLock::new(MonitorState::new(config)))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -333,10 +454,43 @@ mod tests {
     }
 
     #[test]
+    fn time_series_last_n() {
+        let mut ts = TimeSeries::new("test", "", 10);
+        for i in 0..5 {
+            ts.push(i as f64);
+        }
+        assert_eq!(ts.last_n(3), vec![2.0, 3.0, 4.0]);
+        assert_eq!(ts.last_n(10), vec![0.0, 1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
     fn default_config() {
         let cfg = NazarConfig::default();
         assert_eq!(cfg.poll_interval_secs, 5);
         assert_eq!(cfg.max_history_points, 720);
         assert!(cfg.show_anomalies);
+    }
+
+    #[test]
+    fn alert_severity_display() {
+        assert_eq!(AlertSeverity::Info.to_string(), "INFO");
+        assert_eq!(AlertSeverity::Warning.to_string(), "WARNING");
+        assert_eq!(AlertSeverity::Critical.to_string(), "CRITICAL");
+    }
+
+    #[test]
+    fn monitor_state_push_alerts_caps() {
+        let mut state = MonitorState::new(NazarConfig::default());
+        for i in 0..150 {
+            state.push_alerts(vec![Alert {
+                severity: AlertSeverity::Info,
+                component: format!("test-{i}"),
+                message: "test".to_string(),
+                timestamp: Utc::now(),
+            }]);
+        }
+        assert_eq!(state.alerts.len(), 100);
+        // Oldest should be trimmed — latest component is "test-149"
+        assert_eq!(state.alerts.last().unwrap().component, "test-149");
     }
 }

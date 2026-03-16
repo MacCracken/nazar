@@ -15,3 +15,5 @@ eframe = { workspace = true }
 chrono = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+egui_plot = { workspace = true }
+nazar-ai = { path = "../nazar-ai" }
