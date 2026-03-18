@@ -1,6 +1,6 @@
 //! Probes known AGNOS services to build live ServiceStatus entries.
 
-use nazar_core::{ServiceState, ServiceStatus};
+use nazar_core::{AgentSummary, ServiceState, ServiceStatus};
 
 /// Known AGNOS services and their default ports.
 const KNOWN_SERVICES: &[(&str, u16)] = &[

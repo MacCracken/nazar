@@ -129,20 +129,20 @@ impl ProcReader {
                 continue;
             }
             let device = parts[0];
-            let mount_point = parts[1];
+            let mount_point = Self::decode_octal_escapes(parts[1]);
             let filesystem = parts[2];
 
             if !real_fs.contains(&filesystem) {
                 continue;
             }
 
-            if let Some(stat) = Self::statvfs(mount_point) {
+            if let Some(stat) = Self::statvfs(&mount_point) {
                 let total = stat.total_bytes;
                 let available = stat.available_bytes;
                 let used = total.saturating_sub(stat.free_bytes);
 
                 disks.push(DiskMetrics {
-                    mount_point: mount_point.to_string(),
+                    mount_point,
                     device: device.to_string(),
                     filesystem: filesystem.to_string(),
                     total_bytes: total,
@@ -357,6 +357,29 @@ impl ProcReader {
         (total_percent, cores)
     }
 
+    /// Decode octal escape sequences in /proc/mounts paths (e.g. `\040` → space).
+    fn decode_octal_escapes(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                let octal: String = chars.by_ref().take(3).collect();
+                if octal.len() == 3
+                    && let Ok(byte) = u8::from_str_radix(&octal, 8)
+                {
+                    result.push(byte as char);
+                    continue;
+                }
+                // Not a valid octal escape, put it back as-is
+                result.push('\\');
+                result.push_str(&octal);
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
+
     /// Call libc::statvfs for a mount point.
     fn statvfs(path: &str) -> Option<StatVfsResult> {
         use std::ffi::CString;
@@ -489,16 +512,23 @@ mod tests {
     #[test]
     fn snapshot_assembles() {
         let mut reader = ProcReader::new();
-        let agents = AgentSummary {
-            total: 0,
-            running: 0,
-            idle: 0,
-            error: 0,
-            cpu_usage: HashMap::new(),
-            memory_usage: HashMap::new(),
-        };
-        let snap = reader.snapshot(agents, vec![]);
+        let snap = reader.snapshot(AgentSummary::default(), vec![]);
         assert!(snap.memory.total_bytes > 0 || !cfg!(target_os = "linux"));
+    }
+
+    #[test]
+    fn decode_octal_escapes_space() {
+        assert_eq!(ProcReader::decode_octal_escapes("/mnt/my\\040drive"), "/mnt/my drive");
+    }
+
+    #[test]
+    fn decode_octal_escapes_no_escapes() {
+        assert_eq!(ProcReader::decode_octal_escapes("/home/user"), "/home/user");
+    }
+
+    #[test]
+    fn decode_octal_escapes_tab() {
+        assert_eq!(ProcReader::decode_octal_escapes("a\\011b"), "a\tb");
     }
 
     #[test]

@@ -4,16 +4,23 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
+use tower_http::cors::{Any, CorsLayer};
 
 use nazar_core::*;
 
 /// Build the axum router with all API routes.
 pub fn router(state: SharedState) -> axum::Router {
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     axum::Router::new()
         .route("/health", get(api_health))
         .route("/v1/snapshot", get(api_snapshot))
         .route("/v1/alerts", get(api_alerts))
         .route("/v1/predict", get(api_predict))
+        .layer(cors)
         .with_state(state)
 }
 

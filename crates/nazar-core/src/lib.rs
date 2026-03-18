@@ -111,7 +111,7 @@ pub struct InterfaceMetrics {
     pub is_up: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentSummary {
     pub total: usize,
     pub running: usize,
@@ -365,17 +365,19 @@ pub fn new_shared_state(config: NazarConfig) -> SharedState {
 }
 
 /// Read from shared state, recovering from a poisoned lock instead of panicking.
+/// A poisoned lock means a writer panicked mid-update — state may be inconsistent.
 pub fn read_state(state: &SharedState) -> std::sync::RwLockReadGuard<'_, MonitorState> {
     state.read().unwrap_or_else(|poisoned| {
-        tracing::warn!("Recovered from poisoned RwLock (read)");
+        tracing::error!("RwLock poisoned (read) — a writer panicked; state may be inconsistent");
         poisoned.into_inner()
     })
 }
 
 /// Write to shared state, recovering from a poisoned lock instead of panicking.
+/// A poisoned lock means a previous writer panicked mid-update — state may be inconsistent.
 pub fn write_state(state: &SharedState) -> std::sync::RwLockWriteGuard<'_, MonitorState> {
     state.write().unwrap_or_else(|poisoned| {
-        tracing::warn!("Recovered from poisoned RwLock (write)");
+        tracing::error!("RwLock poisoned (write) — a writer panicked; state may be inconsistent");
         poisoned.into_inner()
     })
 }

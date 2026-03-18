@@ -18,11 +18,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - MCP `nazar_config` supports get/set of thresholds with range validation (0.0–100.0, finite)
   - Collector re-reads thresholds from config each tick
 - **CLI `--bind` flag** — control HTTP API bind address (defaults to `127.0.0.1`)
-- **56 tests** across all crates (up from 27)
+- **CORS headers** — permissive CORS layer on HTTP API for browser-based consumers
+- **Alert deduplication** — 60-second cooldown per component prevents duplicate alerts from sustained threshold breaches
+- **Dynamic poll interval** — `poll_interval_secs` changes via MCP take effect immediately (no restart needed)
+- **`show_anomalies` config flag** — when false, suppresses alert generation in the collector
+- **`AgentSummary` derives `Default`** — cleaner construction, future-proofed for daimon integration
+- **Octal escape decoding** — `/proc/mounts` paths with `\040` (space), `\011` (tab) etc. are decoded correctly
+- **59 tests** across all crates (up from 27)
   - Config validation: zero poll interval, low refresh rate, out-of-range thresholds, NaN, unknown keys, boolean validation
   - Service checker: host validation, known services, async probing
   - Network delta computation, TimeSeries zero-max-points edge case
-  - Case-insensitive severity filter
+  - Case-insensitive severity filter, octal escape decoding
 
 ### Changed
 
@@ -41,6 +47,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **MCP alerts filter** — case-insensitive severity matching
 - **MCP history schema** — corrected metric names to `cpu, memory, network_rx, network_tx, disk:<mount>`
 - **MCP dashboard network fields** — `rx_bytes_delta`/`tx_bytes_delta` (was misleading `rx_mb`/`tx_mb`)
+- **RwLock poison logging** escalated from `warn!` to `error!` with clearer diagnostic message
+- **Spawned task monitoring** — headless mode uses `tokio::select!` to detect collector/API panics and log errors
+- **`poll_interval_secs`** — MCP set takes effect immediately (collector re-creates interval on config change)
 
 ### Removed
 

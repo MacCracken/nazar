@@ -1,9 +1,12 @@
 //! Nazar AI — anomaly detection, resource prediction, and recommendations
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use nazar_core::*;
+
+/// Minimum seconds between duplicate alerts for the same component.
+const ALERT_COOLDOWN_SECS: i64 = 60;
 
 /// Simple threshold-based anomaly detector for system metrics.
 pub struct AnomalyDetector {
@@ -12,6 +15,8 @@ pub struct AnomalyDetector {
     disk_threshold: f64,
     history: VecDeque<SystemSnapshot>,
     max_history: usize,
+    /// Tracks the last alert time per component for deduplication.
+    last_alert: HashMap<String, DateTime<Utc>>,
 }
 
 impl AnomalyDetector {
@@ -22,6 +27,7 @@ impl AnomalyDetector {
             disk_threshold: 90.0,
             history: VecDeque::new(),
             max_history: 100,
+            last_alert: HashMap::new(),
         }
     }
 
@@ -33,6 +39,7 @@ impl AnomalyDetector {
             disk_threshold: config.disk_threshold,
             history: VecDeque::new(),
             max_history: 100,
+            last_alert: HashMap::new(),
         }
     }
 
@@ -49,52 +56,61 @@ impl AnomalyDetector {
         self.history.push_back(snapshot);
     }
 
-    /// Check a snapshot for anomalies.
-    pub fn check(&self, snapshot: &SystemSnapshot) -> Vec<Alert> {
+    /// Check a snapshot for anomalies. Deduplicates alerts per component
+    /// with a 60-second cooldown.
+    pub fn check(&mut self, snapshot: &SystemSnapshot) -> Vec<Alert> {
+        let now = Utc::now();
         let mut alerts = Vec::new();
 
         if snapshot.cpu.total_percent > self.cpu_threshold {
-            alerts.push(Alert {
-                severity: AlertSeverity::Warning,
-                component: "cpu".to_string(),
-                message: format!(
-                    "CPU usage at {:.1}% (threshold: {:.1}%)",
-                    snapshot.cpu.total_percent, self.cpu_threshold
-                ),
-                timestamp: Utc::now(),
-            });
+            self.maybe_alert(&mut alerts, now, AlertSeverity::Warning, "cpu", format!(
+                "CPU usage at {:.1}% (threshold: {:.1}%)",
+                snapshot.cpu.total_percent, self.cpu_threshold
+            ));
         }
 
         if snapshot.memory.used_percent() > self.memory_threshold {
-            alerts.push(Alert {
-                severity: AlertSeverity::Warning,
-                component: "memory".to_string(),
-                message: format!(
-                    "Memory usage at {:.1}% (threshold: {:.1}%)",
-                    snapshot.memory.used_percent(),
-                    self.memory_threshold
-                ),
-                timestamp: Utc::now(),
-            });
+            self.maybe_alert(&mut alerts, now, AlertSeverity::Warning, "memory", format!(
+                "Memory usage at {:.1}% (threshold: {:.1}%)",
+                snapshot.memory.used_percent(), self.memory_threshold
+            ));
         }
 
         for disk in &snapshot.disk {
             if disk.used_percent() > self.disk_threshold {
-                alerts.push(Alert {
-                    severity: AlertSeverity::Critical,
-                    component: format!("disk:{}", disk.mount_point),
-                    message: format!(
-                        "Disk {} at {:.1}% (threshold: {:.1}%)",
-                        disk.mount_point,
-                        disk.used_percent(),
-                        self.disk_threshold
-                    ),
-                    timestamp: Utc::now(),
-                });
+                let component = format!("disk:{}", disk.mount_point);
+                let message = format!(
+                    "Disk {} at {:.1}% (threshold: {:.1}%)",
+                    disk.mount_point, disk.used_percent(), self.disk_threshold
+                );
+                self.maybe_alert(&mut alerts, now, AlertSeverity::Critical, &component, message);
             }
         }
 
         alerts
+    }
+
+    /// Push an alert only if the component hasn't alerted within the cooldown period.
+    fn maybe_alert(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        now: DateTime<Utc>,
+        severity: AlertSeverity,
+        component: &str,
+        message: String,
+    ) {
+        if let Some(last) = self.last_alert.get(component)
+            && (now - *last).num_seconds() < ALERT_COOLDOWN_SECS
+        {
+            return;
+        }
+        self.last_alert.insert(component.to_string(), now);
+        alerts.push(Alert {
+            severity,
+            component: component.to_string(),
+            message,
+            timestamp: now,
+        });
     }
 
     /// Predict future resource usage based on linear trend.
@@ -234,7 +250,7 @@ mod tests {
 
     #[test]
     fn anomaly_detector_no_alerts() {
-        let detector = AnomalyDetector::new();
+        let mut detector = AnomalyDetector::new();
         let snap = sample_snapshot(50.0, 8_000_000_000, 16_000_000_000);
         let alerts = detector.check(&snap);
         assert!(alerts.is_empty());
@@ -242,7 +258,7 @@ mod tests {
 
     #[test]
     fn anomaly_detector_cpu_alert() {
-        let detector = AnomalyDetector::new();
+        let mut detector = AnomalyDetector::new();
         let snap = sample_snapshot(95.0, 8_000_000_000, 16_000_000_000);
         let alerts = detector.check(&snap);
         assert!(alerts.iter().any(|a| a.component == "cpu"));
@@ -250,7 +266,7 @@ mod tests {
 
     #[test]
     fn anomaly_detector_memory_alert() {
-        let detector = AnomalyDetector::new();
+        let mut detector = AnomalyDetector::new();
         let snap = sample_snapshot(50.0, 14_000_000_000, 16_000_000_000);
         let alerts = detector.check(&snap);
         assert!(alerts.iter().any(|a| a.component == "memory"));

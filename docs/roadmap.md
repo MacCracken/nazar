@@ -57,13 +57,5 @@ Low-severity items from code audit. Address as time permits.
 
 | # | Item | Notes |
 |---|------|-------|
-| 1 | Monitor spawned task JoinHandles | Collector/API tasks are fire-and-forget; silent panic = silent failure |
-| 2 | Evaluate RwLock poison recovery vs panic | Recovering hides bugs; poisoned state may be inconsistent |
-| 3 | Wire `show_anomalies`/`show_agents` config flags | Config fields exist and are settable via MCP but no code reads them |
-| 4 | Populate real agent data from daimon API | `AgentSummary` is always zeroed; needs daimon `/v1/agents` integration |
-| 5 | CORS headers on HTTP API | Add `tower_http::cors::CorsLayer` if browser-based consumption is needed |
-| 6 | Dynamic poll interval updates | `poll_interval_secs` change via MCP requires restart |
-| 7 | /proc/mounts octal escape decoding | Mount points with spaces use `\040` escaping; currently passed raw |
-| 8 | Alert deduplication / cooldown | Sustained threshold breaches generate identical alerts every tick |
-| 9 | Config persistence to file | `NazarConfig` is serializable but never saved/loaded; changes lost on restart |
-| 10 | Stricter /proc/stat cpu line matching | `starts_with("cpu")` could match unexpected future kernel lines |
+| 1 | Populate real agent data from daimon API | `AgentSummary` is always zeroed; needs daimon `/v1/agents` integration |
+| 2 | Config persistence to file | `NazarConfig` is serializable but never saved/loaded; changes lost on restart |

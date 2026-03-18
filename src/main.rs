@@ -51,19 +51,34 @@ fn main() {
 
     // Start the metrics collector
     let collector_state = Arc::clone(&state);
-    rt.spawn(collector::collector_loop(collector_state));
+    let collector_handle = rt.spawn(collector::collector_loop(collector_state));
 
     // Start the HTTP API
     let api_state = Arc::clone(&state);
     let bind = cli.bind.clone();
     let port = cli.port;
-    rt.spawn(run_http_api(api_state, bind, port));
+    let api_handle = rt.spawn(run_http_api(api_state, bind, port));
 
     if cli.headless {
         tracing::info!("Running in headless mode on port {}", cli.port);
         rt.block_on(async {
-            tokio::signal::ctrl_c().await.ok();
-            tracing::info!("Shutting down");
+            tokio::select! {
+                result = collector_handle => {
+                    match result {
+                        Ok(()) => tracing::error!("Collector exited unexpectedly"),
+                        Err(e) => tracing::error!("Collector panicked: {e}"),
+                    }
+                }
+                result = api_handle => {
+                    match result {
+                        Ok(()) => tracing::error!("HTTP API exited unexpectedly"),
+                        Err(e) => tracing::error!("HTTP API panicked: {e}"),
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Shutting down");
+                }
+            }
         });
     } else {
         tracing::info!("Starting GUI");

@@ -316,15 +316,7 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
                     match k {
                         "poll_interval_secs" => {
                             match v.parse::<u64>() {
-                                Ok(n) if n >= 1 => {
-                                    s.config.poll_interval_secs = n;
-                                    drop(s);
-                                    return ToolResult::ok(serde_json::json!({
-                                        "updated": k,
-                                        "value": v,
-                                        "note": "Takes effect after restart"
-                                    }));
-                                }
+                                Ok(n) if n >= 1 => s.config.poll_interval_secs = n,
                                 Ok(_) => return ToolResult::err("poll_interval_secs must be >= 1"),
                                 Err(_) => return ToolResult::err("Invalid value for poll_interval_secs"),
                             }

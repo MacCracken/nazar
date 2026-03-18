@@ -1,7 +1,5 @@
 //! Metrics collector — polls /proc and daimon, feeds anomaly detector.
 
-use std::collections::HashMap;
-
 use nazar_ai::AnomalyDetector;
 use nazar_api::{ProcReader, ServiceChecker};
 use nazar_core::*;
@@ -34,8 +32,9 @@ pub async fn collector_loop(state: SharedState) {
         tracing::warn!("Invalid service host '{service_host}', service checks disabled");
     }
 
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(poll_secs));
-    tracing::info!("Collector started (poll every {poll_secs}s)");
+    let mut current_poll_secs = poll_secs;
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(current_poll_secs));
+    tracing::info!("Collector started (poll every {current_poll_secs}s)");
 
     // Check services less frequently (every 6th tick = ~30s at default 5s poll)
     let mut tick_count: u64 = 0;
@@ -45,7 +44,9 @@ pub async fn collector_loop(state: SharedState) {
         interval.tick().await;
         tick_count += 1;
 
-        // Refresh thresholds from config on each tick
+        // Refresh config on each tick
+        let show_anomalies;
+        let mut poll_changed = false;
         {
             let s = read_state(&state);
             detector.set_thresholds(
@@ -53,6 +54,18 @@ pub async fn collector_loop(state: SharedState) {
                 s.config.memory_threshold,
                 s.config.disk_threshold,
             );
+            show_anomalies = s.config.show_anomalies;
+
+            if s.config.poll_interval_secs != current_poll_secs {
+                current_poll_secs = s.config.poll_interval_secs;
+                poll_changed = true;
+            }
+        }
+        // Re-create interval outside the lock scope (tick().await is not Send with guard held)
+        if poll_changed {
+            interval = tokio::time::interval(std::time::Duration::from_secs(current_poll_secs));
+            interval.tick().await; // consume the immediate first tick
+            tracing::info!("Poll interval changed to {current_poll_secs}s");
         }
 
         // Probe AGNOS services periodically
@@ -62,19 +75,14 @@ pub async fn collector_loop(state: SharedState) {
             cached_services = checker.check().await;
         }
 
-        let agents = AgentSummary {
-            total: 0,
-            running: 0,
-            idle: 0,
-            error: 0,
-            cpu_usage: HashMap::new(),
-            memory_usage: HashMap::new(),
-        };
-
-        let snapshot = reader.snapshot(agents, cached_services.clone());
+        let snapshot = reader.snapshot(AgentSummary::default(), cached_services.clone());
 
         // Feed the anomaly detector
-        let alerts = detector.check(&snapshot);
+        let alerts = if show_anomalies {
+            detector.check(&snapshot)
+        } else {
+            Vec::new()
+        };
         detector.record(snapshot.clone());
 
         // Update predictions
