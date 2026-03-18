@@ -18,6 +18,10 @@ struct Cli {
     #[arg(long)]
     headless: bool,
 
+    /// Bind address for nazar's HTTP API (use 0.0.0.0 for external access)
+    #[arg(long, default_value = "127.0.0.1")]
+    bind: String,
+
     /// Port for nazar's own API
     #[arg(long, default_value = "8095")]
     port: u16,
@@ -51,8 +55,9 @@ fn main() {
 
     // Start the HTTP API
     let api_state = Arc::clone(&state);
+    let bind = cli.bind.clone();
     let port = cli.port;
-    rt.spawn(run_http_api(api_state, port));
+    rt.spawn(run_http_api(api_state, bind, port));
 
     if cli.headless {
         tracing::info!("Running in headless mode on port {}", cli.port);
@@ -69,9 +74,9 @@ fn main() {
     }
 }
 
-async fn run_http_api(state: SharedState, port: u16) {
+async fn run_http_api(state: SharedState, bind: String, port: u16) {
     let app = http::router(state);
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("{bind}:{port}");
     tracing::info!("HTTP API listening on {addr}");
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {

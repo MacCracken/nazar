@@ -7,13 +7,7 @@ license = "GPL-3.0"
 
 [dependencies]
 nazar-core = { path = "../nazar-core" }
-nazar-api = { path = "../nazar-api" }
-serde = { workspace = true }
-serde_json = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true }
 chrono = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
 egui_plot = { workspace = true }
-nazar-ai = { path = "../nazar-ai" }

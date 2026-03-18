@@ -4,58 +4,57 @@ All notable changes to Nazar will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased] — v1 MVP
+## [2026.3.17] - 2026-03-17
 
 ### Added
 
-- **ProcReader** — stateful `/proc` reader with delta-based CPU usage calculation
-  - `/proc/stat` for total + per-core CPU percentages
-  - `/proc/stat` process/thread counts (`processes`, `procs_running`)
-  - `/proc/mounts` + `statvfs` for disk space (filters to real filesystems)
-  - `/proc/net/dev` for per-interface network metrics
-  - `/proc/net/tcp{,6}` for active connection count
-  - `snapshot()` method assembles all metrics into a `SystemSnapshot`
-- **Metrics pipeline** — tokio interval task collects metrics every 5s
-  - Feeds snapshots to `AnomalyDetector` for threshold-based alerting
-  - Writes to `SharedState` (`Arc<RwLock<MonitorState>>`) for all consumers
-  - Time series history for CPU, memory, disk (per-mount), network rx/tx
-- **HTTP API** — axum server on port 8095
-  - `GET /health` — version, uptime, sample count
-  - `GET /v1/snapshot` — latest full `SystemSnapshot` as JSON
-  - `GET /v1/alerts` — current anomaly alerts
-  - `GET /v1/predict` — resource exhaustion predictions
-- **MCP tool handlers** — 5 tools now have full backend implementations
-  - `nazar_dashboard` — snapshot summary from shared state
-  - `nazar_alerts` — alerts with optional severity filter
-  - `nazar_predict` — exhaustion predictions
-  - `nazar_history` — time series data for any metric (cpu, memory, network, disk)
-  - `nazar_config` — get/set runtime configuration
-- **GUI dashboard** — enhanced egui interface
-  - Real CPU usage percentage (delta-based, not just load average)
-  - Per-core CPU bars
-  - CPU and memory sparkline charts (egui_plot)
-  - Disk usage panel with per-mount progress bars
-  - Network panel with per-interface stats
-  - Alerts panel with severity-colored badges
-  - Predictions panel showing time-to-exhaustion
-  - Live service status (placeholder until daimon connection)
-- **Shared state** — `MonitorState` in nazar-core with `SharedState` type alias
-  - Alert, AlertSeverity, PredictionResult, Trend types moved from nazar-ai to nazar-core
-  - All consumers (UI, API, MCP) read from the same state
-- **Documentation** — ADRs, updated architecture, MCP tool reference with examples
-- **44 tests** across all crates, clean clippy, 0 warnings
+- **Live service status** — probes daimon (8090) and hoosh (8088) health endpoints every ~30s
+  - `ServiceChecker` struct with reusable HTTP client and host validation
+  - Shows Running/Failed/Stopped state with uptime and port in GUI
+- **Panic-safe RwLock helpers** — `read_state()`/`write_state()` recover from poisoned locks
+- **Alert timestamps in UI** — alerts show relative age ("5s ago", "3m ago", "2h ago")
+- **Configurable anomaly thresholds** — `cpu_threshold`, `memory_threshold`, `disk_threshold` in `NazarConfig`
+  - `AnomalyDetector::from_config()` constructor
+  - MCP `nazar_config` supports get/set of thresholds with range validation (0.0–100.0, finite)
+  - Collector re-reads thresholds from config each tick
+- **CLI `--bind` flag** — control HTTP API bind address (defaults to `127.0.0.1`)
+- **56 tests** across all crates (up from 27)
+  - Config validation: zero poll interval, low refresh rate, out-of-range thresholds, NaN, unknown keys, boolean validation
+  - Service checker: host validation, known services, async probing
+  - Network delta computation, TimeSeries zero-max-points edge case
+  - Case-insensitive severity filter
 
 ### Changed
 
-- nazar-api refactored: `ApiClient` for HTTP, new `ProcReader` for /proc
-- nazar-ui now takes `SharedState` instead of polling directly
-- nazar-mcp tools have full handlers (previously definitions only)
-- nazar-ai types (Alert, PredictionResult, Trend) moved to nazar-core
+- **HTTP API binds to 127.0.0.1** by default (was 0.0.0.0). Use `--bind 0.0.0.0` for external access
+- **HTTP API returns proper status codes** — `GET /v1/snapshot` returns 503 when no data, 500 on serialization failure
+- **TimeSeries uses VecDeque** — O(1) push/pop instead of O(n) `Vec::remove(0)` at capacity
+- **AnomalyDetector history uses VecDeque** — same O(1) improvement
+- **Network metrics are delta-based** — `ProcReader` tracks previous counters, reports bytes-since-last-read. History stores B/s rate. UI shows KB/s
+- **Interface up/down detection** reads `/sys/class/net/<name>/operstate` instead of checking byte counts
+- **Single /proc/stat read per tick** — merged `parse_proc_stat()` and `parse_proc_stat_counts()` into one read
+- **CPU `processes` field** now shows running process count (was showing total forks since boot)
+- **UI clones data before rendering** — RwLock read guard dropped before draw calls to prevent writer starvation
+- **Disk history pruned** — entries for unmounted filesystems are removed each tick
+- **Prediction math corrected** — uses `(target - current_value) / slope` for remaining intervals (was using regression intercept)
+- **MCP config validation** — `poll_interval_secs >= 1`, `ui_refresh_ms >= 100`, thresholds finite and 0–100, booleans must be "true"/"false"
+- **MCP alerts filter** — case-insensitive severity matching
+- **MCP history schema** — corrected metric names to `cpu, memory, network_rx, network_tx, disk:<mount>`
+- **MCP dashboard network fields** — `rx_bytes_delta`/`tx_bytes_delta` (was misleading `rx_mb`/`tx_mb`)
 
-### Dependencies
+### Removed
 
-- Added `libc` (statvfs for disk metrics)
-- Added `egui_plot` 0.34 (time series sparklines)
+- **Dead `ApiClient`** — unused HTTP client for daimon removed from `nazar-api`
+- **Dead `AnomalyAlert`** struct removed from `nazar-core`
+- **`nazar-mcp` removed from binary deps** — crate is compiled in workspace but not wired to a transport yet (planned for v2)
+- **Unused dependencies** — `uuid`, `anyhow` removed from workspace; trimmed ~12 unused deps across crates
+
+### Refactored
+
+- **`src/main.rs` split** into `src/http.rs` (API router + handlers) and `src/collector.rs` (metrics loop)
+- **UI `update()` decomposed** into 8 panel methods: `draw_header`, `draw_alerts_panel`, `draw_cpu_panel`, `draw_memory_panel`, `draw_disk_panel`, `draw_network_panel`, `draw_services_panel`, `draw_predictions_panel`
+- **Graceful shutdown** — GUI mode calls `rt.shutdown_timeout(2s)` on window close; API bind failure logs error instead of panicking
+- **`unsafe` statvfs** — added `// SAFETY:` documentation
 
 ## [2026.3.16] - 2026-03-16
 

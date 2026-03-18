@@ -1,7 +1,8 @@
 //! Nazar HTTP API handlers (axum).
 
 use axum::extract::State;
-use axum::response::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 
 use nazar_core::*;
@@ -27,11 +28,20 @@ async fn api_health(State(state): State<SharedState>) -> Json<serde_json::Value>
     }))
 }
 
-async fn api_snapshot(State(state): State<SharedState>) -> Json<serde_json::Value> {
+async fn api_snapshot(State(state): State<SharedState>) -> impl IntoResponse {
     let s = read_state(&state);
     match &s.latest {
-        Some(snap) => Json(serde_json::to_value(snap).unwrap_or_default()),
-        None => Json(serde_json::json!({"error": "No snapshot available yet"})),
+        Some(snap) => match serde_json::to_value(snap) {
+            Ok(val) => (StatusCode::OK, Json(val)),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Serialization failed: {e}")})),
+            ),
+        },
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "No snapshot available yet"})),
+        ),
     }
 }
 

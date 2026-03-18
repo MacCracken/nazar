@@ -4,59 +4,16 @@
 
 ---
 
-## v1 — MVP System Monitor
+## v1 — MVP System Monitor (Complete)
 
-A fully functional system monitor that reads real metrics, displays them in a
-live dashboard, detects anomalies, predicts resource exhaustion, and exposes
-an HTTP API and MCP tools.
+All 23 items shipped. See [CHANGELOG.md](../CHANGELOG.md) for details.
 
-### /proc Readers
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 1 | CPU metrics from /proc/stat | **Done** | Delta-based total % and per-core usage between two reads |
-| 2 | Process/thread counts from /proc/stat | **Done** | Parse `processes` and `procs_running` lines |
-| 3 | Disk space from /proc/mounts + statvfs | **Done** | Mount point, device, filesystem, total/used/available |
-| 4 | Network interfaces from /proc/net/dev | **Done** | Per-interface rx/tx bytes, packets, errors, up/down |
-
-### Metrics Pipeline
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 5 | SystemSnapshot assembly | **Done** | ProcReader.snapshot() combines all /proc readers |
-| 6 | Metrics collection loop | **Done** | Tokio interval task: poll, snapshot, feed to detector/history |
-| 7 | Shared state (Arc<RwLock<>>) | **Done** | MonitorState in nazar-core; collector writes, UI/API/MCP read |
-| 8 | Anomaly detector integration | **Done** | AnomalyDetector wired into collection loop, alerts logged |
-
-### HTTP API (axum)
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 9 | GET /health | **Done** | Version, uptime, sample count |
-| 10 | GET /v1/snapshot | **Done** | Latest SystemSnapshot as JSON |
-| 11 | GET /v1/alerts | **Done** | Current anomaly alerts |
-| 12 | GET /v1/predict | **Done** | Memory/disk exhaustion predictions |
-
-### MCP Tool Handlers
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 13 | nazar_dashboard handler | **Done** | Returns snapshot summary from shared state |
-| 14 | nazar_alerts handler | **Done** | Returns alerts, optional severity filter |
-| 15 | nazar_predict handler | **Done** | Returns prediction results from detector |
-| 16 | nazar_history handler | **Done** | Returns time series points for any metric |
-| 17 | nazar_config handler | **Done** | Get/set NazarConfig fields at runtime |
-
-### GUI Dashboard
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 18 | Real CPU % display | **Done** | Delta-based usage from ProcReader, per-core bars |
-| 19 | Disk usage panel | **Done** | Per-mount progress bars with used/total |
-| 20 | Network panel | **Done** | Per-interface rx/tx with error counts |
-| 21 | Alerts panel | **Done** | Bottom panel with severity-colored alert list |
-| 22 | Time series charts | **Done** | egui_plot sparklines for CPU and memory history |
-| 23 | Service status (live) | **Done** | Probes daimon/hoosh health endpoints every ~30s |
+- /proc readers: CPU (delta-based), memory, disk (statvfs), network (delta-based)
+- Metrics pipeline: tokio collector, shared state, anomaly detection, predictions
+- HTTP API: `/health`, `/v1/snapshot`, `/v1/alerts`, `/v1/predict` on port 8095
+- MCP tool handlers: `nazar_dashboard`, `nazar_alerts`, `nazar_predict`, `nazar_history`, `nazar_config`
+- GUI dashboard: CPU/memory sparklines, disk/network panels, alerts with timestamps, live service status
+- 56 tests, 0 clippy warnings
 
 ---
 
@@ -70,8 +27,9 @@ an HTTP API and MCP tools.
 | 4 | GPU monitoring | Not started | NVIDIA (nvidia-smi) and AMD (amdgpu) |
 | 5 | Temperature sensors | Not started | /sys/class/hwmon/ and /sys/class/thermal/ |
 | 6 | Agent detail view | Not started | Click agent in UI to see per-agent resource breakdown |
-| 7 | AGNOS MCP tool registration | Not started | Register 5 nazar_* tools in daimon's tool registry |
-| 8 | AGNOS agnoshi intents | Not started | NL commands: "show system status", "predict memory", etc. |
+| 7 | MCP transport (stdio/HTTP) | Not started | Wire `nazar-mcp` handlers to a live MCP server |
+| 8 | AGNOS MCP tool registration | Not started | Register nazar_* tools in daimon's tool registry |
+| 9 | AGNOS agnoshi intents | Not started | NL commands: "show system status", "predict memory", etc. |
 
 ## v3 — AI Features
 
@@ -90,3 +48,22 @@ an HTTP API and MCP tools.
 | 2 | Alert notifications | Not started | Desktop notifications via aethersafha |
 | 3 | Historical data persistence | Not started | SQLite for long-term metric storage |
 | 4 | Export to Prometheus | Not started | `/metrics` endpoint in Prometheus format |
+
+---
+
+## Engineering Backlog
+
+Low-severity items from code audit. Address as time permits.
+
+| # | Item | Notes |
+|---|------|-------|
+| 1 | Monitor spawned task JoinHandles | Collector/API tasks are fire-and-forget; silent panic = silent failure |
+| 2 | Evaluate RwLock poison recovery vs panic | Recovering hides bugs; poisoned state may be inconsistent |
+| 3 | Wire `show_anomalies`/`show_agents` config flags | Config fields exist and are settable via MCP but no code reads them |
+| 4 | Populate real agent data from daimon API | `AgentSummary` is always zeroed; needs daimon `/v1/agents` integration |
+| 5 | CORS headers on HTTP API | Add `tower_http::cors::CorsLayer` if browser-based consumption is needed |
+| 6 | Dynamic poll interval updates | `poll_interval_secs` change via MCP requires restart |
+| 7 | /proc/mounts octal escape decoding | Mount points with spaces use `\040` escaping; currently passed raw |
+| 8 | Alert deduplication / cooldown | Sustained threshold breaches generate identical alerts every tick |
+| 9 | Config persistence to file | `NazarConfig` is serializable but never saved/loaded; changes lost on restart |
+| 10 | Stricter /proc/stat cpu line matching | `starts_with("cpu")` could match unexpected future kernel lines |

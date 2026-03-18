@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use nazar_ai::AnomalyDetector;
-use nazar_api::{ProcReader, check_services};
+use nazar_api::{ProcReader, ServiceChecker};
 use nazar_core::*;
 
 /// Run the metrics collection loop. Reads system metrics, checks for anomalies,
@@ -17,8 +17,9 @@ pub async fn collector_loop(state: SharedState) {
         (detector, s.config.poll_interval_secs, s.config.api_url.clone())
     };
 
-    // Take an initial reading so the next one can compute CPU deltas
+    // Take an initial reading so the next one can compute CPU and network deltas
     let _warmup = reader.read_cpu();
+    let _warmup_net = reader.read_network();
 
     // Extract host from api_url for service checks
     let service_host = api_url
@@ -26,8 +27,12 @@ pub async fn collector_loop(state: SharedState) {
         .trim_start_matches("https://")
         .split(':')
         .next()
-        .unwrap_or("127.0.0.1")
-        .to_string();
+        .unwrap_or("127.0.0.1");
+
+    let service_checker = ServiceChecker::new(service_host);
+    if service_checker.is_none() {
+        tracing::warn!("Invalid service host '{service_host}', service checks disabled");
+    }
 
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(poll_secs));
     tracing::info!("Collector started (poll every {poll_secs}s)");
@@ -51,8 +56,10 @@ pub async fn collector_loop(state: SharedState) {
         }
 
         // Probe AGNOS services periodically
-        if tick_count % 6 == 1 {
-            cached_services = check_services(&service_host).await;
+        if tick_count % 6 == 1
+            && let Some(ref checker) = service_checker
+        {
+            cached_services = checker.check().await;
         }
 
         let agents = AgentSummary {
@@ -81,10 +88,17 @@ pub async fn collector_loop(state: SharedState) {
             let mut s = write_state(&state);
             s.cpu_history.push(snapshot.cpu.total_percent);
             s.mem_history.push(snapshot.memory.used_percent());
-            s.net_rx_history.push(snapshot.network.total_rx_bytes as f64);
-            s.net_tx_history.push(snapshot.network.total_tx_bytes as f64);
+            // Convert bytes-per-interval to bytes-per-second
+            let poll = s.config.poll_interval_secs.max(1) as f64;
+            s.net_rx_history.push(snapshot.network.total_rx_bytes as f64 / poll);
+            s.net_tx_history.push(snapshot.network.total_tx_bytes as f64 / poll);
 
             let max = s.config.max_history_points;
+            // Collect current mount points
+            let current_mounts: std::collections::HashSet<&str> =
+                snapshot.disk.iter().map(|d| d.mount_point.as_str()).collect();
+            // Remove history for unmounted filesystems
+            s.disk_history.retain(|k, _| current_mounts.contains(k.as_str()));
             for disk in &snapshot.disk {
                 s.disk_history
                     .entry(disk.mount_point.clone())

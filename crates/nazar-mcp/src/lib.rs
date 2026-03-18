@@ -73,7 +73,7 @@ pub fn tool_definitions() -> Vec<ToolDescription> {
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "metric": {"type": "string", "description": "Metric: cpu, memory, disk, network"},
+                    "metric": {"type": "string", "description": "Metric: cpu, memory, network_rx, network_tx, or disk:<mount_point>"},
                     "points": {"type": "integer", "description": "Number of data points (default: 60)"}
                 },
                 "required": ["metric"]
@@ -133,8 +133,8 @@ fn handle_dashboard(state: &SharedState) -> ToolResult {
                 "total_gb": d.total_bytes as f64 / 1e9,
             })).collect::<Vec<_>>(),
             "network": {
-                "rx_mb": snap.network.total_rx_bytes as f64 / 1e6,
-                "tx_mb": snap.network.total_tx_bytes as f64 / 1e6,
+                "rx_bytes_delta": snap.network.total_rx_bytes,
+                "tx_bytes_delta": snap.network.total_tx_bytes,
                 "connections": snap.network.active_connections,
             },
             "agents": {
@@ -150,13 +150,16 @@ fn handle_dashboard(state: &SharedState) -> ToolResult {
 
 fn handle_alerts(params: &serde_json::Value, state: &SharedState) -> ToolResult {
     let s = read_state(state);
-    let severity_filter = params.get("severity").and_then(|v| v.as_str());
+    let severity_filter = params
+        .get("severity")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_lowercase());
 
     let alerts: Vec<_> = s
         .alerts
         .iter()
         .filter(|a| {
-            severity_filter.is_none_or(|f| {
+            severity_filter.as_deref().is_none_or(|f| {
                 matches!(
                     (f, &a.severity),
                     ("info", AlertSeverity::Info)
@@ -312,35 +315,49 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
                     let mut s = write_state(state);
                     match k {
                         "poll_interval_secs" => {
-                            if let Ok(n) = v.parse::<u64>() {
-                                s.config.poll_interval_secs = n;
-                            } else {
-                                return ToolResult::err("Invalid value for poll_interval_secs");
+                            match v.parse::<u64>() {
+                                Ok(n) if n >= 1 => {
+                                    s.config.poll_interval_secs = n;
+                                    drop(s);
+                                    return ToolResult::ok(serde_json::json!({
+                                        "updated": k,
+                                        "value": v,
+                                        "note": "Takes effect after restart"
+                                    }));
+                                }
+                                Ok(_) => return ToolResult::err("poll_interval_secs must be >= 1"),
+                                Err(_) => return ToolResult::err("Invalid value for poll_interval_secs"),
                             }
                         }
-                        "show_anomalies" => {
-                            s.config.show_anomalies = v == "true";
-                        }
-                        "show_agents" => {
-                            s.config.show_agents = v == "true";
-                        }
+                        "show_anomalies" => match v {
+                            "true" => s.config.show_anomalies = true,
+                            "false" => s.config.show_anomalies = false,
+                            _ => return ToolResult::err("show_anomalies must be 'true' or 'false'"),
+                        },
+                        "show_agents" => match v {
+                            "true" => s.config.show_agents = true,
+                            "false" => s.config.show_agents = false,
+                            _ => return ToolResult::err("show_agents must be 'true' or 'false'"),
+                        },
                         "ui_refresh_ms" => {
-                            if let Ok(n) = v.parse::<u64>() {
-                                s.config.ui_refresh_ms = n;
-                            } else {
-                                return ToolResult::err("Invalid value for ui_refresh_ms");
+                            match v.parse::<u64>() {
+                                Ok(n) if n >= 100 => s.config.ui_refresh_ms = n,
+                                Ok(_) => return ToolResult::err("ui_refresh_ms must be >= 100"),
+                                Err(_) => return ToolResult::err("Invalid value for ui_refresh_ms"),
                             }
                         }
                         "cpu_threshold" | "memory_threshold" | "disk_threshold" => {
-                            if let Ok(n) = v.parse::<f64>() {
-                                match k {
-                                    "cpu_threshold" => s.config.cpu_threshold = n,
-                                    "memory_threshold" => s.config.memory_threshold = n,
-                                    "disk_threshold" => s.config.disk_threshold = n,
-                                    _ => unreachable!(),
+                            match v.parse::<f64>() {
+                                Ok(n) if n.is_finite() && (0.0..=100.0).contains(&n) => {
+                                    match k {
+                                        "cpu_threshold" => s.config.cpu_threshold = n,
+                                        "memory_threshold" => s.config.memory_threshold = n,
+                                        "disk_threshold" => s.config.disk_threshold = n,
+                                        _ => unreachable!(),
+                                    }
                                 }
-                            } else {
-                                return ToolResult::err(&format!("Invalid value for {k}"));
+                                Ok(_) => return ToolResult::err(&format!("{k} must be a finite number between 0.0 and 100.0")),
+                                Err(_) => return ToolResult::err(&format!("Invalid value for {k}")),
                             }
                         }
                         _ => return ToolResult::err(&format!("Unknown config key: {k}")),
@@ -457,5 +474,101 @@ mod tests {
         let state = new_shared_state(NazarConfig::default());
         let result = execute_tool("nazar_foo", &serde_json::json!({}), &state);
         assert!(result.is_error);
+    }
+
+    #[test]
+    fn config_set_poll_interval_zero_rejected() {
+        let state = new_shared_state(NazarConfig::default());
+        let result = execute_tool(
+            "nazar_config",
+            &serde_json::json!({"action": "set", "key": "poll_interval_secs", "value": "0"}),
+            &state,
+        );
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn config_set_ui_refresh_too_low_rejected() {
+        let state = new_shared_state(NazarConfig::default());
+        let result = execute_tool(
+            "nazar_config",
+            &serde_json::json!({"action": "set", "key": "ui_refresh_ms", "value": "10"}),
+            &state,
+        );
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn config_set_threshold_out_of_range() {
+        let state = new_shared_state(NazarConfig::default());
+        let result = execute_tool(
+            "nazar_config",
+            &serde_json::json!({"action": "set", "key": "cpu_threshold", "value": "150.0"}),
+            &state,
+        );
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn config_set_threshold_nan_rejected() {
+        let state = new_shared_state(NazarConfig::default());
+        let result = execute_tool(
+            "nazar_config",
+            &serde_json::json!({"action": "set", "key": "cpu_threshold", "value": "NaN"}),
+            &state,
+        );
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn config_set_unknown_key_rejected() {
+        let state = new_shared_state(NazarConfig::default());
+        let result = execute_tool(
+            "nazar_config",
+            &serde_json::json!({"action": "set", "key": "nonexistent", "value": "42"}),
+            &state,
+        );
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn config_set_bool_validates() {
+        let state = new_shared_state(NazarConfig::default());
+        // Invalid boolean value
+        let result = execute_tool(
+            "nazar_config",
+            &serde_json::json!({"action": "set", "key": "show_anomalies", "value": "yes"}),
+            &state,
+        );
+        assert!(result.is_error);
+        // Valid boolean value
+        let result = execute_tool(
+            "nazar_config",
+            &serde_json::json!({"action": "set", "key": "show_anomalies", "value": "false"}),
+            &state,
+        );
+        assert!(!result.is_error);
+    }
+
+    #[test]
+    fn alerts_severity_filter_case_insensitive() {
+        let state = new_shared_state(NazarConfig::default());
+        {
+            let mut s = state.write().unwrap();
+            s.alerts.push(Alert {
+                severity: AlertSeverity::Warning,
+                component: "cpu".to_string(),
+                message: "high".to_string(),
+                timestamp: chrono::Utc::now(),
+            });
+        }
+        // Uppercase should match
+        let result = execute_tool(
+            "nazar_alerts",
+            &serde_json::json!({"severity": "WARNING"}),
+            &state,
+        );
+        assert!(!result.is_error);
+        assert_eq!(result.content["count"], 1);
     }
 }

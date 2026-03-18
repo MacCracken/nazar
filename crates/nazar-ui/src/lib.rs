@@ -42,12 +42,15 @@ impl NazarApp {
 
     fn draw_alerts_panel(&self, ui: &mut egui::Ui) {
         ui.heading("Alerts");
-        let s = read_state(&self.state);
-        if s.alerts.is_empty() {
+        let alerts = {
+            let s = read_state(&self.state);
+            s.alerts.clone()
+        };
+        if alerts.is_empty() {
             ui.label("No active alerts");
         } else {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                for alert in s.alerts.iter().rev().take(20) {
+                for alert in alerts.iter().rev().take(20) {
                     let color = match alert.severity {
                         AlertSeverity::Critical => egui::Color32::RED,
                         AlertSeverity::Warning => egui::Color32::YELLOW,
@@ -79,13 +82,12 @@ impl NazarApp {
             ui.heading("CPU");
             ui.horizontal(|ui| {
                 ui.label(format!(
-                    "Usage: {:.1}%  |  Load: {:.2} / {:.2} / {:.2}  |  Procs: {}  Threads: {}",
+                    "Usage: {:.1}%  |  Load: {:.2} / {:.2} / {:.2}  |  Running: {}",
                     snap.cpu.total_percent,
                     snap.cpu.load_average[0],
                     snap.cpu.load_average[1],
                     snap.cpu.load_average[2],
                     snap.cpu.processes,
-                    snap.cpu.threads,
                 ));
             });
             ui.add(
@@ -200,9 +202,9 @@ impl NazarApp {
             ui.heading("Network");
             let net = &snap.network;
             ui.label(format!(
-                "Total RX: {:.1} MB  |  TX: {:.1} MB  |  Connections: {}",
-                net.total_rx_bytes as f64 / 1e6,
-                net.total_tx_bytes as f64 / 1e6,
+                "RX: {:.1} KB/s  |  TX: {:.1} KB/s  |  Connections: {}",
+                net.total_rx_bytes as f64 / 1024.0,
+                net.total_tx_bytes as f64 / 1024.0,
                 net.active_connections,
             ));
             for iface in &net.interfaces {
@@ -210,10 +212,10 @@ impl NazarApp {
                     continue;
                 }
                 ui.label(format!(
-                    "  {} — RX: {:.1} MB  TX: {:.1} MB{}",
+                    "  {} — RX: {:.1} KB  TX: {:.1} KB{}",
                     iface.name,
-                    iface.rx_bytes as f64 / 1e6,
-                    iface.tx_bytes as f64 / 1e6,
+                    iface.rx_bytes as f64 / 1024.0,
+                    iface.tx_bytes as f64 / 1024.0,
                     if iface.rx_errors > 0 || iface.tx_errors > 0 {
                         format!("  (errors: rx={} tx={})", iface.rx_errors, iface.tx_errors)
                     } else {
@@ -313,26 +315,30 @@ impl eframe::App for NazarApp {
                 return;
             }
 
-            let s = read_state(&self.state);
-            let snap = s.latest.as_ref().unwrap();
-            let cpu_data = s.cpu_history.last_n(120);
-            let mem_data = s.mem_history.last_n(120);
-            let predictions = s.predictions.clone();
-            let poll_secs = s.config.poll_interval_secs;
+            // Clone all needed data out of the lock to avoid holding it during rendering
+            let (snap, cpu_data, mem_data, predictions, poll_secs) = {
+                let s = read_state(&self.state);
+                let snap = s.latest.clone().unwrap();
+                let cpu_data = s.cpu_history.last_n(120);
+                let mem_data = s.mem_history.last_n(120);
+                let predictions = s.predictions.clone();
+                let poll_secs = s.config.poll_interval_secs;
+                (snap, cpu_data, mem_data, predictions, poll_secs)
+            };
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                self.draw_cpu_panel(ui, snap, cpu_data);
+                self.draw_cpu_panel(ui, &snap, cpu_data);
                 ui.add_space(8.0);
-                self.draw_memory_panel(ui, snap, mem_data);
+                self.draw_memory_panel(ui, &snap, mem_data);
                 ui.add_space(8.0);
 
                 ui.columns(2, |cols| {
-                    self.draw_disk_panel(&mut cols[0], snap);
-                    self.draw_network_panel(&mut cols[1], snap);
+                    self.draw_disk_panel(&mut cols[0], &snap);
+                    self.draw_network_panel(&mut cols[1], &snap);
                 });
 
                 ui.add_space(8.0);
-                self.draw_services_panel(ui, snap);
+                self.draw_services_panel(ui, &snap);
 
                 if !predictions.is_empty() {
                     ui.add_space(8.0);

@@ -14,9 +14,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 reqwest = { version = "0.12", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "2"
-anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
@@ -38,7 +36,6 @@ nazar-core = { path = "crates/nazar-core" }
 nazar-api = { path = "crates/nazar-api" }
 nazar-ui = { path = "crates/nazar-ui" }
 nazar-ai = { path = "crates/nazar-ai" }
-nazar-mcp = { path = "crates/nazar-mcp" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

@@ -2,7 +2,7 @@
 //!
 //! Named after the Arabic/Persian نظر (watchful eye).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Utc};
@@ -153,18 +153,6 @@ impl std::fmt::Display for ServiceState {
     }
 }
 
-/// An anomaly alert from the daimon anomaly detector.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnomalyAlert {
-    pub agent_id: String,
-    pub metric: String,
-    pub severity: String,
-    pub current_value: f64,
-    pub baseline_mean: f64,
-    pub deviation_sigmas: f64,
-    pub timestamp: DateTime<Utc>,
-}
-
 // ---------------------------------------------------------------------------
 // Alert types (used by nazar-ai, HTTP API, MCP, UI)
 // ---------------------------------------------------------------------------
@@ -222,12 +210,12 @@ pub struct DataPoint {
     pub value: f64,
 }
 
-/// Time-series buffer for a single metric.
+/// Time-series buffer for a single metric (ring buffer via VecDeque).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeSeries {
     pub name: String,
     pub unit: String,
-    pub points: Vec<DataPoint>,
+    pub points: VecDeque<DataPoint>,
     pub max_points: usize,
 }
 
@@ -236,23 +224,26 @@ impl TimeSeries {
         Self {
             name: name.into(),
             unit: unit.into(),
-            points: Vec::new(),
+            points: VecDeque::new(),
             max_points,
         }
     }
 
     pub fn push(&mut self, value: f64) {
-        self.points.push(DataPoint {
+        if self.max_points == 0 {
+            return;
+        }
+        if self.points.len() >= self.max_points {
+            self.points.pop_front();
+        }
+        self.points.push_back(DataPoint {
             timestamp: Utc::now(),
             value,
         });
-        if self.points.len() > self.max_points {
-            self.points.remove(0);
-        }
     }
 
     pub fn latest(&self) -> Option<f64> {
-        self.points.last().map(|p| p.value)
+        self.points.back().map(|p| p.value)
     }
 
     pub fn average(&self) -> f64 {
@@ -274,7 +265,7 @@ impl TimeSeries {
     /// Return the last `n` values (for sparklines / charts).
     pub fn last_n(&self, n: usize) -> Vec<f64> {
         let start = self.points.len().saturating_sub(n);
-        self.points[start..].iter().map(|p| p.value).collect()
+        self.points.iter().skip(start).map(|p| p.value).collect()
     }
 }
 
@@ -476,6 +467,15 @@ mod tests {
         assert_eq!(ts.average(), 0.0);
         assert_eq!(ts.min(), None);
         assert_eq!(ts.max(), None);
+    }
+
+    #[test]
+    fn time_series_zero_max_points() {
+        let mut ts = TimeSeries::new("zero", "", 0);
+        ts.push(42.0);
+        ts.push(99.0);
+        assert!(ts.points.is_empty());
+        assert_eq!(ts.latest(), None);
     }
 
     #[test]

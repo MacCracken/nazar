@@ -29,17 +29,27 @@ impl CpuTimes {
     }
 }
 
+/// Previous network counters for delta computation.
+#[derive(Debug, Clone, Default)]
+struct NetCounters {
+    per_interface: HashMap<String, (u64, u64)>, // (rx_bytes, tx_bytes)
+    total_rx: u64,
+    total_tx: u64,
+}
+
 /// Reads system metrics from /proc on Linux.
 ///
-/// Holds previous CPU readings so it can compute delta-based usage percentages.
+/// Holds previous CPU and network readings so it can compute delta-based metrics.
 pub struct ProcReader {
     prev_cpu_times: Option<Vec<CpuTimes>>,
+    prev_net: Option<NetCounters>,
 }
 
 impl ProcReader {
     pub fn new() -> Self {
         Self {
             prev_cpu_times: None,
+            prev_net: None,
         }
     }
 
@@ -48,9 +58,8 @@ impl ProcReader {
     /// The first call returns 0% usage (no previous sample to diff against).
     /// Subsequent calls return real usage based on the delta between reads.
     pub fn read_cpu(&mut self) -> CpuMetrics {
-        let current = Self::parse_proc_stat();
+        let (current, procs_running) = Self::parse_proc_stat();
         let load_average = Self::parse_loadavg();
-        let (processes, threads) = Self::parse_proc_stat_counts();
 
         let (total_percent, cores) = if let Some(ref prev) = self.prev_cpu_times {
             Self::compute_cpu_deltas(prev, &current)
@@ -64,8 +73,8 @@ impl ProcReader {
             cores,
             total_percent,
             load_average,
-            processes,
-            threads,
+            processes: procs_running,
+            threads: 0, // thread count requires /proc/[pid] enumeration (v2)
         }
     }
 
@@ -149,14 +158,15 @@ impl ProcReader {
     }
 
     /// Read network interface metrics from /proc/net/dev.
-    pub fn read_network(&self) -> NetworkMetrics {
+    ///
+    /// Returns delta-based byte counts (bytes since last read) rather than
+    /// cumulative counters. The first call returns zeros for deltas.
+    pub fn read_network(&mut self) -> NetworkMetrics {
         let mut interfaces = Vec::new();
-        let mut total_rx: u64 = 0;
-        let mut total_tx: u64 = 0;
+        let mut current_counters = NetCounters::default();
 
         if let Ok(content) = std::fs::read_to_string("/proc/net/dev") {
             for line in content.lines().skip(2) {
-                // Format: "iface: rx_bytes rx_packets rx_errs rx_drop ... tx_bytes tx_packets tx_errs tx_drop ..."
                 let line = line.trim();
                 let Some((name, rest)) = line.split_once(':') else {
                     continue;
@@ -171,38 +181,66 @@ impl ProcReader {
                     continue;
                 }
 
-                let rx_bytes = vals[0];
+                let cum_rx = vals[0];
                 let rx_packets = vals[1];
                 let rx_errors = vals[2];
-                let tx_bytes = vals[8];
+                let cum_tx = vals[8];
                 let tx_packets = vals[9];
                 let tx_errors = vals[10];
 
-                // Skip loopback in totals
+                // Compute deltas from previous reading
+                let (delta_rx, delta_tx) = if let Some(ref prev) = self.prev_net {
+                    if let Some(&(prev_rx, prev_tx)) = prev.per_interface.get(name) {
+                        (cum_rx.saturating_sub(prev_rx), cum_tx.saturating_sub(prev_tx))
+                    } else {
+                        (0, 0)
+                    }
+                } else {
+                    (0, 0)
+                };
+
+                current_counters.per_interface.insert(name.to_string(), (cum_rx, cum_tx));
+
                 if name != "lo" {
-                    total_rx += rx_bytes;
-                    total_tx += tx_bytes;
+                    current_counters.total_rx += cum_rx;
+                    current_counters.total_tx += cum_tx;
                 }
+
+                // Check operstate for accurate up/down detection
+                let is_up = std::fs::read_to_string(format!("/sys/class/net/{name}/operstate"))
+                    .map(|s| s.trim() == "up")
+                    .unwrap_or(cum_rx > 0 || cum_tx > 0);
 
                 interfaces.push(InterfaceMetrics {
                     name: name.to_string(),
-                    rx_bytes,
-                    tx_bytes,
+                    rx_bytes: delta_rx,
+                    tx_bytes: delta_tx,
                     rx_packets,
                     tx_packets,
                     rx_errors,
                     tx_errors,
-                    is_up: rx_bytes > 0 || tx_bytes > 0,
+                    is_up,
                 });
             }
         }
+
+        let (total_delta_rx, total_delta_tx) = if let Some(ref prev) = self.prev_net {
+            (
+                current_counters.total_rx.saturating_sub(prev.total_rx),
+                current_counters.total_tx.saturating_sub(prev.total_tx),
+            )
+        } else {
+            (0, 0)
+        };
+
+        self.prev_net = Some(current_counters);
 
         let active_connections = Self::count_connections();
 
         NetworkMetrics {
             interfaces,
-            total_rx_bytes: total_rx,
-            total_tx_bytes: total_tx,
+            total_rx_bytes: total_delta_rx,
+            total_tx_bytes: total_delta_tx,
             active_connections,
         }
     }
@@ -227,40 +265,47 @@ impl ProcReader {
     // Internal helpers
     // -----------------------------------------------------------------------
 
-    /// Parse all cpu lines from /proc/stat. Index 0 is the aggregate `cpu` line.
-    fn parse_proc_stat() -> Vec<CpuTimes> {
+    /// Parse /proc/stat in a single read: CPU times + running process count.
+    fn parse_proc_stat() -> (Vec<CpuTimes>, u64) {
         let content = match std::fs::read_to_string("/proc/stat") {
             Ok(c) => c,
-            Err(_) => return vec![CpuTimes::default()],
+            Err(_) => return (vec![CpuTimes::default()], 0),
         };
 
         let mut times = Vec::new();
+        let mut procs_running = 0u64;
+
         for line in content.lines() {
-            if !line.starts_with("cpu") {
-                continue;
+            if line.starts_with("cpu") {
+                // Match "cpu " (aggregate) or "cpu0", "cpu1", etc.
+                let first_word = line.split_whitespace().next().unwrap_or("");
+                if first_word != "cpu" && !first_word.strip_prefix("cpu").is_some_and(|s| s.starts_with(|c: char| c.is_ascii_digit())) {
+                    continue;
+                }
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() < 8 {
+                    continue;
+                }
+                let parse = |i: usize| -> u64 { parts.get(i).and_then(|v| v.parse().ok()).unwrap_or(0) };
+                times.push(CpuTimes {
+                    user: parse(1),
+                    nice: parse(2),
+                    system: parse(3),
+                    idle: parse(4),
+                    iowait: parse(5),
+                    irq: parse(6),
+                    softirq: parse(7),
+                    steal: if parts.len() > 8 { parse(8) } else { 0 },
+                });
+            } else if let Some(rest) = line.strip_prefix("procs_running ") {
+                procs_running = rest.trim().parse().unwrap_or(0);
             }
-            // "cpu" (aggregate) or "cpu0", "cpu1", etc.
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() < 8 {
-                continue;
-            }
-            let parse = |i: usize| -> u64 { parts.get(i).and_then(|v| v.parse().ok()).unwrap_or(0) };
-            times.push(CpuTimes {
-                user: parse(1),
-                nice: parse(2),
-                system: parse(3),
-                idle: parse(4),
-                iowait: parse(5),
-                irq: parse(6),
-                softirq: parse(7),
-                steal: if parts.len() > 8 { parse(8) } else { 0 },
-            });
         }
 
         if times.is_empty() {
             times.push(CpuTimes::default());
         }
-        times
+        (times, procs_running)
     }
 
     /// Parse /proc/loadavg.
@@ -280,27 +325,6 @@ impl ProcReader {
                 }
             })
             .unwrap_or([0.0; 3])
-    }
-
-    /// Parse process and thread counts from /proc/stat.
-    fn parse_proc_stat_counts() -> (u64, u64) {
-        let content = match std::fs::read_to_string("/proc/stat") {
-            Ok(c) => c,
-            Err(_) => return (0, 0),
-        };
-
-        let mut processes = 0u64;
-        let mut procs_running = 0u64;
-
-        for line in content.lines() {
-            if let Some(rest) = line.strip_prefix("processes ") {
-                processes = rest.trim().parse().unwrap_or(0);
-            } else if let Some(rest) = line.strip_prefix("procs_running ") {
-                procs_running = rest.trim().parse().unwrap_or(0);
-            }
-        }
-
-        (processes, procs_running)
     }
 
     /// Compute CPU usage percentages from two consecutive /proc/stat reads.
@@ -337,6 +361,9 @@ impl ProcReader {
     fn statvfs(path: &str) -> Option<StatVfsResult> {
         use std::ffi::CString;
         let c_path = CString::new(path).ok()?;
+        // SAFETY: `c_path` is a valid NUL-terminated C string (CString guarantees this),
+        // and `buf` is a properly sized, zeroed statvfs struct passed by mutable pointer.
+        // `libc::statvfs` writes into `buf` only on success (returns 0).
         unsafe {
             let mut buf: libc::statvfs = std::mem::zeroed();
             if libc::statvfs(c_path.as_ptr(), &mut buf) == 0 {
@@ -437,13 +464,26 @@ mod tests {
 
     #[test]
     fn read_network_runs() {
-        let reader = ProcReader::new();
+        let mut reader = ProcReader::new();
         let net = reader.read_network();
         // Should find at least lo on Linux
         if cfg!(target_os = "linux") {
             assert!(!net.interfaces.is_empty(), "expected at least one interface");
             assert!(net.interfaces.iter().any(|i| i.name == "lo"));
         }
+    }
+
+    #[test]
+    fn read_network_deltas() {
+        let mut reader = ProcReader::new();
+        // First read: deltas should be zero (no previous sample)
+        let first = reader.read_network();
+        assert_eq!(first.total_rx_bytes, 0);
+        assert_eq!(first.total_tx_bytes, 0);
+        // Second read: deltas should be >= 0
+        let second = reader.read_network();
+        // Can't assert specific values, but should not panic
+        assert!(second.total_rx_bytes <= u64::MAX);
     }
 
     #[test]

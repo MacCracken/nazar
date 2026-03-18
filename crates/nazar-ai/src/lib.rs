@@ -1,5 +1,7 @@
 //! Nazar AI — anomaly detection, resource prediction, and recommendations
 
+use std::collections::VecDeque;
+
 use chrono::Utc;
 use nazar_core::*;
 
@@ -8,7 +10,7 @@ pub struct AnomalyDetector {
     cpu_threshold: f64,
     memory_threshold: f64,
     disk_threshold: f64,
-    history: Vec<SystemSnapshot>,
+    history: VecDeque<SystemSnapshot>,
     max_history: usize,
 }
 
@@ -18,7 +20,7 @@ impl AnomalyDetector {
             cpu_threshold: 90.0,
             memory_threshold: 85.0,
             disk_threshold: 90.0,
-            history: Vec::new(),
+            history: VecDeque::new(),
             max_history: 100,
         }
     }
@@ -29,7 +31,7 @@ impl AnomalyDetector {
             cpu_threshold: config.cpu_threshold,
             memory_threshold: config.memory_threshold,
             disk_threshold: config.disk_threshold,
-            history: Vec::new(),
+            history: VecDeque::new(),
             max_history: 100,
         }
     }
@@ -41,10 +43,10 @@ impl AnomalyDetector {
     }
 
     pub fn record(&mut self, snapshot: SystemSnapshot) {
-        self.history.push(snapshot);
-        if self.history.len() > self.max_history {
-            self.history.remove(0);
+        if self.history.len() >= self.max_history {
+            self.history.pop_front();
         }
+        self.history.push_back(snapshot);
     }
 
     /// Check a snapshot for anomalies.
@@ -108,18 +110,40 @@ impl AnomalyDetector {
             .map(|(i, s)| (i as f64, s.memory.used_percent()))
             .collect();
 
-        let (slope, intercept) = linear_regression(&points)?;
+        let (slope, _intercept) = linear_regression(&points)?;
         if slope <= 0.0 {
             return None;
         }
 
         let target = 95.0;
-        let steps_to_target = (target - intercept) / slope;
-        let intervals = steps_to_target as u64;
+        let current_value = points.last().map(|p| p.1).unwrap_or(0.0);
+
+        // Already past the target — exhaustion is now
+        if current_value >= target {
+            return Some(PredictionResult {
+                metric: "memory".to_string(),
+                current_value,
+                predicted_value: target,
+                intervals_until: 0,
+                trend: Trend::Rising,
+            });
+        }
+
+        // Calculate remaining intervals based on how far current_value is from
+        // the target at the current slope, not from the regression intercept.
+        let remaining = (target - current_value) / slope;
+
+        // Negative or non-finite means exhaustion is not approaching
+        if !remaining.is_finite() || remaining < 0.0 {
+            return None;
+        }
+
+        // Cap at a reasonable maximum (7 days at 5s intervals = ~120,960)
+        let intervals = (remaining as u64).min(200_000);
 
         Some(PredictionResult {
             metric: "memory".to_string(),
-            current_value: points.last().map(|p| p.1).unwrap_or(0.0),
+            current_value,
             predicted_value: target,
             intervals_until: intervals,
             trend: if slope > 0.5 {
