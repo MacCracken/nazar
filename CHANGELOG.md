@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **GPU monitoring** — AMD and NVIDIA GPU metrics
+  - `GpuMetrics` struct: id, driver, name, utilization%, VRAM used/total, temp, power, clock
+  - **AMD amdgpu**: reads sysfs — `gpu_busy_percent`, `mem_info_vram_*`, hwmon temp/power/clock
+  - **NVIDIA**: fallback via `nvidia-smi --query-gpu` CSV output (utilization, VRAM, temp, power, clock)
+  - Auto-detects GPU driver from `/sys/class/drm/card*/device/driver` symlink
+  - GUI: "GPU" panel with utilization + VRAM progress bars, temp/power/clock inline
+  - MCP: `nazar_dashboard` includes `gpu` array
+  - Included in `/v1/snapshot` JSON response
 - **Temperature sensors** — reads from `/sys/class/thermal/thermal_zone*/` and `/sys/class/hwmon/hwmon*/`
   - `ThermalInfo` struct: label, temp_celsius, critical_celsius
   - Reads thermal zone type, hwmon labels, and critical trip points
@@ -52,7 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Octal escape decoding** — `/proc/mounts` paths with `\040` (space), `\011` (tab) etc. are decoded correctly
 - **Agent data from daimon** — `ServiceChecker::fetch_agents()` queries daimon `/v1/agents` for real agent counts, CPU, and memory usage. Falls back to defaults when unreachable
 - **Config persistence** — `NazarConfig::load()`/`save()` to `~/.config/nazar/config.json`. Loaded on startup (CLI `--api-url` overrides). MCP config `set` auto-persists changes
-- **70 tests** across all crates (up from 27)
+- **72 tests** across all crates (up from 27)
   - Config validation: zero poll interval, low refresh rate, out-of-range thresholds, NaN, unknown keys, boolean validation
   - Service checker: host validation, known services, async probing, agent fetch fallback
   - Network delta computation, TimeSeries zero-max-points edge case

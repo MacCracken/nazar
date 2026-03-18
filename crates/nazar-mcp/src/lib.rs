@@ -134,6 +134,18 @@ fn handle_dashboard(state: &SharedState) -> ToolResult {
                 "read_kb": d.read_bytes as f64 / 1024.0,
                 "write_kb": d.write_bytes as f64 / 1024.0,
             })).collect::<Vec<_>>(),
+            "gpu": snap.gpu.iter().map(|g| serde_json::json!({
+                "id": g.id,
+                "driver": g.driver,
+                "name": g.name,
+                "utilization_percent": g.utilization_percent,
+                "vram_used_mb": g.vram_used_bytes as f64 / 1e6,
+                "vram_total_mb": g.vram_total_bytes as f64 / 1e6,
+                "vram_used_percent": g.vram_used_percent(),
+                "temp_celsius": g.temp_celsius,
+                "power_watts": g.power_watts,
+                "clock_mhz": g.clock_mhz,
+            })).collect::<Vec<_>>(),
             "temperatures": snap.temperatures.iter().map(|t| serde_json::json!({
                 "label": t.label,
                 "temp_celsius": t.temp_celsius,

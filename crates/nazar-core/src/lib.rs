@@ -22,9 +22,33 @@ pub struct SystemSnapshot {
     pub disk: Vec<DiskMetrics>,
     pub network: NetworkMetrics,
     pub temperatures: Vec<ThermalInfo>,
+    pub gpu: Vec<GpuMetrics>,
     pub agents: AgentSummary,
     pub services: Vec<ServiceStatus>,
     pub top_processes: Vec<ProcessInfo>,
+}
+
+/// GPU metrics from sysfs (amdgpu) or nvidia-smi.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuMetrics {
+    pub id: String,
+    pub driver: String,
+    pub name: String,
+    pub utilization_percent: f64,
+    pub vram_total_bytes: u64,
+    pub vram_used_bytes: u64,
+    pub temp_celsius: Option<f64>,
+    pub power_watts: Option<f64>,
+    pub clock_mhz: Option<u64>,
+}
+
+impl GpuMetrics {
+    pub fn vram_used_percent(&self) -> f64 {
+        if self.vram_total_bytes == 0 {
+            return 0.0;
+        }
+        (self.vram_used_bytes as f64 / self.vram_total_bytes as f64) * 100.0
+    }
 }
 
 /// Temperature reading from a thermal zone or hardware monitor.

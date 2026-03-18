@@ -259,6 +259,48 @@ impl NazarApp {
         });
     }
 
+    fn draw_gpu_panel(&self, ui: &mut egui::Ui, snap: &SystemSnapshot) {
+        if snap.gpu.is_empty() {
+            return;
+        }
+        ui.group(|ui| {
+            ui.heading("GPU");
+            for g in &snap.gpu {
+                ui.label(format!("{} ({}) — {}", g.name, g.driver, g.id));
+                ui.horizontal(|ui| {
+                    ui.label(format!("Usage: {:.0}%", g.utilization_percent));
+                    ui.separator();
+                    ui.label(format!(
+                        "VRAM: {:.0} MB / {:.0} MB ({:.1}%)",
+                        g.vram_used_bytes as f64 / 1e6,
+                        g.vram_total_bytes as f64 / 1e6,
+                        g.vram_used_percent()
+                    ));
+                    if let Some(temp) = g.temp_celsius {
+                        ui.separator();
+                        ui.label(format!("{:.0}°C", temp));
+                    }
+                    if let Some(power) = g.power_watts {
+                        ui.separator();
+                        ui.label(format!("{:.1}W", power));
+                    }
+                    if let Some(clock) = g.clock_mhz {
+                        ui.separator();
+                        ui.label(format!("{} MHz", clock));
+                    }
+                });
+                ui.add(
+                    egui::ProgressBar::new((g.utilization_percent / 100.0) as f32)
+                        .text(format!("GPU {:.0}%", g.utilization_percent)),
+                );
+                ui.add(
+                    egui::ProgressBar::new((g.vram_used_percent() / 100.0) as f32)
+                        .text(format!("VRAM {:.1}%", g.vram_used_percent())),
+                );
+            }
+        });
+    }
+
     fn draw_temperatures_panel(&self, ui: &mut egui::Ui, snap: &SystemSnapshot) {
         if snap.temperatures.is_empty() {
             return;
@@ -437,6 +479,7 @@ impl eframe::App for NazarApp {
                 });
 
                 ui.add_space(8.0);
+                self.draw_gpu_panel(ui, &snap);
                 self.draw_temperatures_panel(ui, &snap);
 
                 ui.add_space(8.0);

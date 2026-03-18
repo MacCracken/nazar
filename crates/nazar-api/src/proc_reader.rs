@@ -503,6 +503,143 @@ impl ProcReader {
         procs_with_cpu
     }
 
+    /// Read GPU metrics from sysfs (amdgpu) or nvidia-smi fallback.
+    pub fn read_gpu(&self) -> Vec<GpuMetrics> {
+        let mut gpus = Vec::new();
+
+        let Ok(drm_entries) = std::fs::read_dir("/sys/class/drm") else {
+            return gpus;
+        };
+
+        for entry in drm_entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            // Match "card0", "card1", etc. — skip "card0-DP-1" render nodes
+            if !name_str.starts_with("card") || name_str.contains('-') {
+                continue;
+            }
+
+            let device_path = entry.path().join("device");
+            if !device_path.exists() {
+                continue;
+            }
+
+            // Detect driver
+            let driver = std::fs::read_link(device_path.join("driver"))
+                .ok()
+                .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string()))
+                .unwrap_or_default();
+
+            if driver == "amdgpu"
+                && let Some(gpu) = Self::read_amdgpu(&name_str, &device_path)
+            {
+                gpus.push(gpu);
+            }
+            // nvidia-smi fallback handled separately below
+        }
+
+        // NVIDIA fallback via nvidia-smi (if no NVIDIA GPUs found via sysfs)
+        if !gpus.iter().any(|g| g.driver == "nvidia") {
+            gpus.extend(Self::read_nvidia_smi());
+        }
+
+        gpus
+    }
+
+    /// Read AMD GPU metrics from sysfs.
+    fn read_amdgpu(card_id: &str, device_path: &std::path::Path) -> Option<GpuMetrics> {
+        let read_u64 = |path: std::path::PathBuf| -> u64 {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0)
+        };
+
+        let utilization = read_u64(device_path.join("gpu_busy_percent")) as f64;
+        let vram_total = read_u64(device_path.join("mem_info_vram_total"));
+        let vram_used = read_u64(device_path.join("mem_info_vram_used"));
+
+        // Find hwmon directory for temperature, power, clock
+        let mut temp_celsius = None;
+        let mut power_watts = None;
+        let mut clock_mhz = None;
+
+        if let Ok(hwmon_entries) = std::fs::read_dir(device_path.join("hwmon"))
+            && let Some(hwmon) = hwmon_entries.flatten().next()
+        {
+            let hp = hwmon.path();
+            if let Ok(t) = std::fs::read_to_string(hp.join("temp1_input"))
+                && let Ok(millideg) = t.trim().parse::<i64>()
+            {
+                temp_celsius = Some(millideg as f64 / 1000.0);
+            }
+            if let Ok(p) = std::fs::read_to_string(hp.join("power1_input"))
+                && let Ok(microwatts) = p.trim().parse::<u64>()
+            {
+                power_watts = Some(microwatts as f64 / 1_000_000.0);
+            }
+            if let Ok(f) = std::fs::read_to_string(hp.join("freq1_input"))
+                && let Ok(hz) = f.trim().parse::<u64>()
+            {
+                clock_mhz = Some(hz / 1_000_000);
+            }
+        }
+
+        // Read GPU name from PCI device
+        let gpu_name = std::fs::read_to_string(device_path.join("product_name"))
+            .or_else(|_| std::fs::read_to_string(device_path.join("label")))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "AMD GPU".to_string());
+
+        Some(GpuMetrics {
+            id: card_id.to_string(),
+            driver: "amdgpu".to_string(),
+            name: gpu_name,
+            utilization_percent: utilization,
+            vram_total_bytes: vram_total,
+            vram_used_bytes: vram_used,
+            temp_celsius,
+            power_watts,
+            clock_mhz,
+        })
+    }
+
+    /// Try to read NVIDIA GPU metrics via nvidia-smi.
+    fn read_nvidia_smi() -> Vec<GpuMetrics> {
+        let Ok(output) = std::process::Command::new("nvidia-smi")
+            .args(["--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.gr", "--format=csv,noheader,nounits"])
+            .output()
+        else {
+            return Vec::new();
+        };
+
+        if !output.status.success() {
+            return Vec::new();
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout
+            .lines()
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split(", ").collect();
+                if fields.len() < 8 {
+                    return None;
+                }
+                Some(GpuMetrics {
+                    id: format!("gpu{}", fields[0].trim()),
+                    driver: "nvidia".to_string(),
+                    name: fields[1].trim().to_string(),
+                    utilization_percent: fields[2].trim().parse().unwrap_or(0.0),
+                    vram_used_bytes: fields[3].trim().parse::<u64>().unwrap_or(0) * 1024 * 1024, // MiB to bytes
+                    vram_total_bytes: fields[4].trim().parse::<u64>().unwrap_or(0) * 1024 * 1024,
+                    temp_celsius: fields[5].trim().parse().ok(),
+                    power_watts: fields[6].trim().parse().ok(),
+                    clock_mhz: fields[7].trim().parse().ok(),
+                })
+            })
+            .collect()
+    }
+
     /// Assemble a full SystemSnapshot from all local /proc readers.
     ///
     /// `agents` and `services` are passed in (they come from the daimon API,
@@ -519,6 +656,7 @@ impl ProcReader {
             disk: self.read_disk(),
             network: self.read_network(),
             temperatures: self.read_temperatures(),
+            gpu: self.read_gpu(),
             agents,
             services,
             top_processes,
@@ -821,6 +959,30 @@ mod tests {
         for d in &second {
             assert!(d.read_bytes <= u64::MAX);
             assert!(d.write_bytes <= u64::MAX);
+        }
+    }
+
+    #[test]
+    fn read_gpu_runs() {
+        let reader = ProcReader::new();
+        let gpus = reader.read_gpu();
+        // On a system with a GPU, should find entries
+        for g in &gpus {
+            assert!(!g.id.is_empty());
+            assert!(!g.driver.is_empty());
+            assert!(g.utilization_percent >= 0.0 && g.utilization_percent <= 100.0);
+        }
+    }
+
+    #[test]
+    fn read_gpu_has_amd_on_this_system() {
+        let reader = ProcReader::new();
+        let gpus = reader.read_gpu();
+        // This system has an AMD GPU
+        if std::path::Path::new("/sys/class/drm/card0/device/gpu_busy_percent").exists() {
+            assert!(!gpus.is_empty(), "expected AMD GPU on this system");
+            assert_eq!(gpus[0].driver, "amdgpu");
+            assert!(gpus[0].vram_total_bytes > 0);
         }
     }
 

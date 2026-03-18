@@ -245,6 +245,7 @@ mod tests {
                 memory_usage: HashMap::new(),
             },
             temperatures: vec![],
+            gpu: vec![],
             services: vec![],
             top_processes: vec![],
         }
