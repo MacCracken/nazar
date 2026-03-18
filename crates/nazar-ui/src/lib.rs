@@ -182,12 +182,20 @@ impl NazarApp {
                 ui.label("No disk data");
             } else {
                 for d in &snap.disk {
+                    let io_str = if d.read_bytes > 0 || d.write_bytes > 0 {
+                        format!("  R: {:.0} KB  W: {:.0} KB",
+                            d.read_bytes as f64 / 1024.0,
+                            d.write_bytes as f64 / 1024.0)
+                    } else {
+                        String::new()
+                    };
                     ui.label(format!(
-                        "{} ({}) — {:.1} GB / {:.1} GB",
+                        "{} ({}) — {:.1} GB / {:.1} GB{}",
                         d.mount_point,
                         d.device,
                         d.used_bytes as f64 / 1e9,
                         d.total_bytes as f64 / 1e9,
+                        io_str,
                     ));
                     ui.add(
                         egui::ProgressBar::new((d.used_percent() / 100.0) as f32)
@@ -198,7 +206,12 @@ impl NazarApp {
         });
     }
 
-    fn draw_network_panel(&self, ui: &mut egui::Ui, snap: &SystemSnapshot) {
+    fn draw_network_panel(
+        &self,
+        ui: &mut egui::Ui,
+        snap: &SystemSnapshot,
+        iface_history: &std::collections::HashMap<String, (Vec<f64>, Vec<f64>)>,
+    ) {
         ui.group(|ui| {
             ui.heading("Network");
             let net = &snap.network;
@@ -222,6 +235,52 @@ impl NazarApp {
                     } else {
                         String::new()
                     },
+                ));
+                // Per-interface sparkline
+                if let Some((rx_data, tx_data)) = iface_history.get(&iface.name)
+                    && rx_data.len() > 1
+                {
+                        let rx_points: egui_plot::PlotPoints = rx_data
+                            .iter().enumerate().map(|(i, v)| [i as f64, *v / 1024.0]).collect();
+                        let tx_points: egui_plot::PlotPoints = tx_data
+                            .iter().enumerate().map(|(i, v)| [i as f64, *v / 1024.0]).collect();
+                        egui_plot::Plot::new(format!("net_{}", iface.name))
+                            .height(50.0)
+                            .show_axes(false)
+                            .allow_drag(false)
+                            .allow_zoom(false)
+                            .allow_scroll(false)
+                            .show(ui, |plot_ui| {
+                                plot_ui.line(egui_plot::Line::new("RX KB/s", rx_points));
+                                plot_ui.line(egui_plot::Line::new("TX KB/s", tx_points));
+                            });
+                }
+            }
+        });
+    }
+
+    fn draw_temperatures_panel(&self, ui: &mut egui::Ui, snap: &SystemSnapshot) {
+        if snap.temperatures.is_empty() {
+            return;
+        }
+        ui.group(|ui| {
+            ui.heading("Temperatures");
+            for t in &snap.temperatures {
+                let crit_str = if let Some(crit) = t.critical_celsius {
+                    format!(" / {:.0}°C crit", crit)
+                } else {
+                    String::new()
+                };
+                let color = if t.critical_celsius.is_some_and(|c| t.temp_celsius > c * 0.9) {
+                    egui::Color32::RED
+                } else if t.temp_celsius > 70.0 {
+                    egui::Color32::YELLOW
+                } else {
+                    egui::Color32::LIGHT_GRAY
+                };
+                ui.colored_label(color, format!(
+                    "{}: {:.1}°C{}",
+                    t.label, t.temp_celsius, crit_str
                 ));
             }
         });
@@ -351,14 +410,19 @@ impl eframe::App for NazarApp {
             }
 
             // Clone all needed data out of the lock to avoid holding it during rendering
-            let (snap, cpu_data, mem_data, predictions, poll_secs) = {
+            let (snap, cpu_data, mem_data, iface_history, predictions, poll_secs) = {
                 let s = read_state(&self.state);
                 let snap = s.latest.clone().unwrap();
                 let cpu_data = s.cpu_history.last_n(120);
                 let mem_data = s.mem_history.last_n(120);
+                let iface_history: std::collections::HashMap<String, (Vec<f64>, Vec<f64>)> = s
+                    .net_iface_history
+                    .iter()
+                    .map(|(k, (rx, tx))| (k.clone(), (rx.last_n(60), tx.last_n(60))))
+                    .collect();
                 let predictions = s.predictions.clone();
                 let poll_secs = s.config.poll_interval_secs;
-                (snap, cpu_data, mem_data, predictions, poll_secs)
+                (snap, cpu_data, mem_data, iface_history, predictions, poll_secs)
             };
 
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -369,8 +433,11 @@ impl eframe::App for NazarApp {
 
                 ui.columns(2, |cols| {
                     self.draw_disk_panel(&mut cols[0], &snap);
-                    self.draw_network_panel(&mut cols[1], &snap);
+                    self.draw_network_panel(&mut cols[1], &snap, &iface_history);
                 });
+
+                ui.add_space(8.0);
+                self.draw_temperatures_panel(ui, &snap);
 
                 ui.add_space(8.0);
                 self.draw_processes_panel(ui, &snap);

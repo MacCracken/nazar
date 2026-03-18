@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Temperature sensors** — reads from `/sys/class/thermal/thermal_zone*/` and `/sys/class/hwmon/hwmon*/`
+  - `ThermalInfo` struct: label, temp_celsius, critical_celsius
+  - Reads thermal zone type, hwmon labels, and critical trip points
+  - GUI: "Temperatures" panel with color-coded readings (yellow >70C, red >90% of critical)
+  - MCP: `nazar_dashboard` includes `temperatures` array
+  - Included in `/v1/snapshot` JSON response
+- **Disk I/O throughput** — delta-based read/write bytes per device
+  - Parses `/proc/diskstats` for sector counts, converts to bytes (512B sectors)
+  - `DiskMetrics.read_bytes`/`write_bytes` now populated (were always 0)
+  - GUI: disk panel shows "R: X KB  W: Y KB" per mount
+  - MCP: dashboard disk entries include `read_kb`/`write_kb`
+- **Network traffic time series** — per-interface rx/tx rate sparklines
+  - `MonitorState.net_iface_history`: per-interface `(TimeSeries, TimeSeries)` for rx/tx B/s
+  - Collector tracks history for all non-loopback interfaces, prunes disappeared interfaces
+  - GUI: inline sparkline chart per interface showing RX/TX KB/s over time
 - **Per-process CPU/memory monitoring** — top-N processes by CPU usage
   - `ProcessInfo` struct: pid, name, state, cpu_percent (delta-based), memory_bytes (RSS), memory_percent, threads
   - `ProcReader::read_processes()` enumerates `/proc/[pid]/stat` and `/proc/[pid]/statm`
@@ -37,7 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Octal escape decoding** — `/proc/mounts` paths with `\040` (space), `\011` (tab) etc. are decoded correctly
 - **Agent data from daimon** — `ServiceChecker::fetch_agents()` queries daimon `/v1/agents` for real agent counts, CPU, and memory usage. Falls back to defaults when unreachable
 - **Config persistence** — `NazarConfig::load()`/`save()` to `~/.config/nazar/config.json`. Loaded on startup (CLI `--api-url` overrides). MCP config `set` auto-persists changes
-- **67 tests** across all crates (up from 27)
+- **70 tests** across all crates (up from 27)
   - Config validation: zero poll interval, low refresh rate, out-of-range thresholds, NaN, unknown keys, boolean validation
   - Service checker: host validation, known services, async probing, agent fetch fallback
   - Network delta computation, TimeSeries zero-max-points edge case

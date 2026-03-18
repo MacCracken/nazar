@@ -50,12 +50,20 @@ impl ProcCpuTimes {
     }
 }
 
+/// Previous disk I/O counters for delta computation.
+#[derive(Debug, Clone, Default)]
+struct DiskIoCounters {
+    /// device_name -> (read_bytes, write_bytes)
+    per_device: HashMap<String, (u64, u64)>,
+}
+
 /// Reads system metrics from /proc on Linux.
 ///
-/// Holds previous CPU, network, and per-process readings for delta-based metrics.
+/// Holds previous CPU, network, disk I/O, and per-process readings for delta-based metrics.
 pub struct ProcReader {
     prev_cpu_times: Option<Vec<CpuTimes>>,
     prev_net: Option<NetCounters>,
+    prev_disk_io: Option<DiskIoCounters>,
     prev_proc_times: HashMap<u32, ProcCpuTimes>,
     /// System-wide total CPU delta from the last `read_cpu()` call.
     last_system_cpu_delta: u64,
@@ -72,6 +80,7 @@ impl ProcReader {
         Self {
             prev_cpu_times: None,
             prev_net: None,
+            prev_disk_io: None,
             prev_proc_times: HashMap::new(),
             last_system_cpu_delta: 0,
             num_cores: 0,
@@ -142,10 +151,12 @@ impl ProcReader {
         }
     }
 
-    /// Read disk space metrics from /proc/mounts + statvfs.
-    ///
-    /// Filters to real filesystems (ext4, btrfs, xfs, f2fs, zfs, ntfs, vfat).
-    pub fn read_disk(&self) -> Vec<DiskMetrics> {
+    /// Read disk space metrics from /proc/mounts + statvfs, with I/O throughput
+    /// from /proc/diskstats (delta-based).
+    pub fn read_disk(&mut self) -> Vec<DiskMetrics> {
+        // First, read current I/O counters from /proc/diskstats
+        let current_io = Self::parse_diskstats();
+
         let mut disks = Vec::new();
         let real_fs = ["ext4", "ext3", "ext2", "btrfs", "xfs", "f2fs", "zfs", "ntfs", "vfat", "fuseblk"];
 
@@ -172,6 +183,24 @@ impl ProcReader {
                 let available = stat.available_bytes;
                 let used = total.saturating_sub(stat.free_bytes);
 
+                // Extract short device name (e.g. "/dev/sda1" -> "sda1")
+                let dev_short = device.rsplit('/').next().unwrap_or(device);
+
+                // Compute I/O deltas
+                let (read_bytes, write_bytes) = if let Some((cur_r, cur_w)) = current_io.per_device.get(dev_short) {
+                    if let Some(ref prev) = self.prev_disk_io {
+                        if let Some((prev_r, prev_w)) = prev.per_device.get(dev_short) {
+                            (cur_r.saturating_sub(*prev_r), cur_w.saturating_sub(*prev_w))
+                        } else {
+                            (0, 0)
+                        }
+                    } else {
+                        (0, 0)
+                    }
+                } else {
+                    (0, 0)
+                };
+
                 disks.push(DiskMetrics {
                     mount_point,
                     device: device.to_string(),
@@ -179,13 +208,103 @@ impl ProcReader {
                     total_bytes: total,
                     used_bytes: used,
                     available_bytes: available,
-                    read_bytes: 0,
-                    write_bytes: 0,
+                    read_bytes,
+                    write_bytes,
                 });
             }
         }
 
+        self.prev_disk_io = Some(current_io);
         disks
+    }
+
+    /// Read temperature sensors from /sys/class/thermal and /sys/class/hwmon.
+    pub fn read_temperatures(&self) -> Vec<ThermalInfo> {
+        let mut temps = Vec::new();
+
+        // /sys/class/thermal/thermal_zone*/temp (millidegrees C)
+        if let Ok(entries) = std::fs::read_dir("/sys/class/thermal") {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if !name_str.starts_with("thermal_zone") {
+                    continue;
+                }
+                let path = entry.path();
+                let temp = std::fs::read_to_string(path.join("temp"))
+                    .ok()
+                    .and_then(|s| s.trim().parse::<i64>().ok())
+                    .map(|t| t as f64 / 1000.0);
+                let label = std::fs::read_to_string(path.join("type"))
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_else(|_| name_str.to_string());
+                let critical = std::fs::read_to_string(path.join("trip_point_0_temp"))
+                    .ok()
+                    .and_then(|s| s.trim().parse::<i64>().ok())
+                    .map(|t| t as f64 / 1000.0);
+
+                if let Some(temp_celsius) = temp {
+                    temps.push(ThermalInfo {
+                        label,
+                        temp_celsius,
+                        critical_celsius: critical,
+                    });
+                }
+            }
+        }
+
+        // /sys/class/hwmon/hwmon*/temp*_input (millidegrees C)
+        if let Ok(hwmons) = std::fs::read_dir("/sys/class/hwmon") {
+            for hwmon in hwmons.flatten() {
+                let hwmon_path = hwmon.path();
+                let hwmon_name = std::fs::read_to_string(hwmon_path.join("name"))
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+
+                let Ok(files) = std::fs::read_dir(&hwmon_path) else { continue };
+                for file in files.flatten() {
+                    let fname = file.file_name();
+                    let fname_str = fname.to_string_lossy();
+                    if !fname_str.ends_with("_input") || !fname_str.starts_with("temp") {
+                        continue;
+                    }
+
+                    let temp = std::fs::read_to_string(file.path())
+                        .ok()
+                        .and_then(|s| s.trim().parse::<i64>().ok())
+                        .map(|t| t as f64 / 1000.0);
+
+                    let Some(temp_celsius) = temp else { continue };
+
+                    // Try to read the label (e.g. temp1_label)
+                    let label_file = fname_str.replace("_input", "_label");
+                    let label = std::fs::read_to_string(hwmon_path.join(&label_file))
+                        .map(|s| s.trim().to_string())
+                        .unwrap_or_else(|_| {
+                            if hwmon_name.is_empty() {
+                                fname_str.replace("_input", "").to_string()
+                            } else {
+                                format!("{}/{}", hwmon_name, fname_str.replace("_input", ""))
+                            }
+                        });
+
+                    // Try to read critical threshold
+                    let crit_file = fname_str.replace("_input", "_crit");
+                    let critical = std::fs::read_to_string(hwmon_path.join(&crit_file))
+                        .ok()
+                        .and_then(|s| s.trim().parse::<i64>().ok())
+                        .map(|t| t as f64 / 1000.0);
+
+                    temps.push(ThermalInfo {
+                        label,
+                        temp_celsius,
+                        critical_celsius: critical,
+                    });
+                }
+            }
+        }
+
+        temps
     }
 
     /// Read network interface metrics from /proc/net/dev.
@@ -399,6 +518,7 @@ impl ProcReader {
             memory,
             disk: self.read_disk(),
             network: self.read_network(),
+            temperatures: self.read_temperatures(),
             agents,
             services,
             top_processes,
@@ -408,6 +528,33 @@ impl ProcReader {
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
+
+    /// Parse /proc/diskstats for per-device I/O counters.
+    /// Returns cumulative read/write bytes per device.
+    fn parse_diskstats() -> DiskIoCounters {
+        let mut counters = DiskIoCounters::default();
+        let Ok(content) = std::fs::read_to_string("/proc/diskstats") else {
+            return counters;
+        };
+
+        for line in content.lines() {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            // /proc/diskstats format: major minor name rd_ios ... rd_sectors ... wr_ios ... wr_sectors ...
+            // Field indices (0-based): 2=name, 5=rd_sectors, 9=wr_sectors
+            if fields.len() < 14 {
+                continue;
+            }
+            let name = fields[2];
+            // Skip partition-less whole-disk entries if partitions exist
+            // (e.g. skip "sda" if "sda1" exists — we'll handle this by matching device names)
+            let rd_sectors = fields[5].parse::<u64>().unwrap_or(0);
+            let wr_sectors = fields[9].parse::<u64>().unwrap_or(0);
+            // Sector size is 512 bytes in /proc/diskstats
+            counters.per_device.insert(name.to_string(), (rd_sectors * 512, wr_sectors * 512));
+        }
+
+        counters
+    }
 
     /// Parse /proc/stat in a single read: CPU times + running process count.
     fn parse_proc_stat() -> (Vec<CpuTimes>, u64) {
@@ -617,7 +764,7 @@ mod tests {
 
     #[test]
     fn read_disk_runs() {
-        let reader = ProcReader::new();
+        let mut reader = ProcReader::new();
         let disks = reader.read_disk();
         // Should find at least root filesystem on Linux
         if cfg!(target_os = "linux") {
@@ -658,6 +805,43 @@ mod tests {
         let mut reader = ProcReader::new();
         let snap = reader.snapshot(AgentSummary::default(), vec![], 5);
         assert!(snap.memory.total_bytes > 0 || !cfg!(target_os = "linux"));
+    }
+
+    #[test]
+    fn read_disk_io_deltas() {
+        let mut reader = ProcReader::new();
+        // First read: I/O deltas should be zero
+        let first = reader.read_disk();
+        for d in &first {
+            assert_eq!(d.read_bytes, 0);
+            assert_eq!(d.write_bytes, 0);
+        }
+        // Second read: deltas should be >= 0
+        let second = reader.read_disk();
+        for d in &second {
+            assert!(d.read_bytes <= u64::MAX);
+            assert!(d.write_bytes <= u64::MAX);
+        }
+    }
+
+    #[test]
+    fn read_temperatures_runs() {
+        let reader = ProcReader::new();
+        let temps = reader.read_temperatures();
+        // On Linux with thermal zones, should find at least one
+        // But don't hard-fail on systems without sensors
+        for t in &temps {
+            assert!(!t.label.is_empty());
+            assert!(t.temp_celsius > -50.0 && t.temp_celsius < 200.0);
+        }
+    }
+
+    #[test]
+    fn parse_diskstats_runs() {
+        let counters = ProcReader::parse_diskstats();
+        if cfg!(target_os = "linux") {
+            assert!(!counters.per_device.is_empty(), "expected at least one device");
+        }
     }
 
     #[test]

@@ -107,6 +107,26 @@ pub async fn collector_loop(state: SharedState) {
             s.net_rx_history.push(snapshot.network.total_rx_bytes as f64 / poll);
             s.net_tx_history.push(snapshot.network.total_tx_bytes as f64 / poll);
 
+            // Per-interface network history
+            let max = s.config.max_history_points;
+            for iface in &snapshot.network.interfaces {
+                if iface.name == "lo" {
+                    continue;
+                }
+                let (rx_hist, tx_hist) = s.net_iface_history
+                    .entry(iface.name.clone())
+                    .or_insert_with(|| (
+                        TimeSeries::new(format!("{} RX", iface.name), "B/s", max),
+                        TimeSeries::new(format!("{} TX", iface.name), "B/s", max),
+                    ));
+                rx_hist.push(iface.rx_bytes as f64 / poll);
+                tx_hist.push(iface.tx_bytes as f64 / poll);
+            }
+            // Prune history for interfaces that disappeared
+            let current_ifaces: std::collections::HashSet<&str> =
+                snapshot.network.interfaces.iter().map(|i| i.name.as_str()).collect();
+            s.net_iface_history.retain(|k, _| current_ifaces.contains(k.as_str()));
+
             let max = s.config.max_history_points;
             // Collect current mount points
             let current_mounts: std::collections::HashSet<&str> =

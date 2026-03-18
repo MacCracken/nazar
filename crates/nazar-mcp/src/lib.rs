@@ -131,6 +131,13 @@ fn handle_dashboard(state: &SharedState) -> ToolResult {
                 "used_percent": d.used_percent(),
                 "used_gb": d.used_bytes as f64 / 1e9,
                 "total_gb": d.total_bytes as f64 / 1e9,
+                "read_kb": d.read_bytes as f64 / 1024.0,
+                "write_kb": d.write_bytes as f64 / 1024.0,
+            })).collect::<Vec<_>>(),
+            "temperatures": snap.temperatures.iter().map(|t| serde_json::json!({
+                "label": t.label,
+                "temp_celsius": t.temp_celsius,
+                "critical_celsius": t.critical_celsius,
             })).collect::<Vec<_>>(),
             "network": {
                 "rx_bytes_delta": snap.network.total_rx_bytes,

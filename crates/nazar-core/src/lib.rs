@@ -21,9 +21,20 @@ pub struct SystemSnapshot {
     pub memory: MemoryMetrics,
     pub disk: Vec<DiskMetrics>,
     pub network: NetworkMetrics,
+    pub temperatures: Vec<ThermalInfo>,
     pub agents: AgentSummary,
     pub services: Vec<ServiceStatus>,
     pub top_processes: Vec<ProcessInfo>,
+}
+
+/// Temperature reading from a thermal zone or hardware monitor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThermalInfo {
+    pub label: String,
+    /// Temperature in degrees Celsius.
+    pub temp_celsius: f64,
+    /// Critical temperature threshold, if known.
+    pub critical_celsius: Option<f64>,
 }
 
 /// Per-process resource usage (top-N by CPU).
@@ -394,6 +405,8 @@ pub struct MonitorState {
     pub disk_history: HashMap<String, TimeSeries>,
     pub net_rx_history: TimeSeries,
     pub net_tx_history: TimeSeries,
+    /// Per-interface network history: interface_name -> (rx B/s, tx B/s).
+    pub net_iface_history: HashMap<String, (TimeSeries, TimeSeries)>,
     pub config: NazarConfig,
     pub started_at: DateTime<Utc>,
 }
@@ -410,6 +423,7 @@ impl MonitorState {
             disk_history: HashMap::new(),
             net_rx_history: TimeSeries::new("Net RX", "B/s", max),
             net_tx_history: TimeSeries::new("Net TX", "B/s", max),
+            net_iface_history: HashMap::new(),
             config,
             started_at: Utc::now(),
         }
