@@ -24,11 +24,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`show_anomalies` config flag** — when false, suppresses alert generation in the collector
 - **`AgentSummary` derives `Default`** — cleaner construction, future-proofed for daimon integration
 - **Octal escape decoding** — `/proc/mounts` paths with `\040` (space), `\011` (tab) etc. are decoded correctly
-- **59 tests** across all crates (up from 27)
+- **Agent data from daimon** — `ServiceChecker::fetch_agents()` queries daimon `/v1/agents` for real agent counts, CPU, and memory usage. Falls back to defaults when unreachable
+- **Config persistence** — `NazarConfig::load()`/`save()` to `~/.config/nazar/config.json`. Loaded on startup (CLI `--api-url` overrides). MCP config `set` auto-persists changes
+- **63 tests** across all crates (up from 27)
   - Config validation: zero poll interval, low refresh rate, out-of-range thresholds, NaN, unknown keys, boolean validation
-  - Service checker: host validation, known services, async probing
+  - Service checker: host validation, known services, async probing, agent fetch fallback
   - Network delta computation, TimeSeries zero-max-points edge case
   - Case-insensitive severity filter, octal escape decoding
+  - Config save/load round-trip, missing file fallback, invalid JSON fallback
 
 ### Changed
 

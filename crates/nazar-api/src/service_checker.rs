@@ -39,6 +39,52 @@ impl ServiceChecker {
         })
     }
 
+    /// Fetch agent summary from daimon's `/v1/agents` endpoint.
+    /// Returns `AgentSummary::default()` if daimon is unreachable or the response
+    /// doesn't match the expected schema.
+    pub async fn fetch_agents(&self) -> AgentSummary {
+        let url = format!("http://{}:8090/v1/agents", self.host);
+        let resp = match self.client.get(&url).send().await {
+            Ok(r) if r.status().is_success() => r,
+            _ => return AgentSummary::default(),
+        };
+
+        let body: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(_) => return AgentSummary::default(),
+        };
+
+        let get_usize = |key| body.get(key).and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+        let mut summary = AgentSummary {
+            total: get_usize("total"),
+            running: get_usize("running"),
+            idle: get_usize("idle"),
+            error: get_usize("error"),
+            ..AgentSummary::default()
+        };
+
+        // Parse per-agent CPU usage: {"cpu_usage": {"agent_id": 12.5, ...}}
+        if let Some(cpu_map) = body.get("cpu_usage").and_then(|v| v.as_object()) {
+            for (k, v) in cpu_map {
+                if let Some(pct) = v.as_f64() {
+                    summary.cpu_usage.insert(k.clone(), pct);
+                }
+            }
+        }
+
+        // Parse per-agent memory usage: {"memory_usage": {"agent_id": 1234567, ...}}
+        if let Some(mem_map) = body.get("memory_usage").and_then(|v| v.as_object()) {
+            for (k, v) in mem_map {
+                if let Some(bytes) = v.as_u64() {
+                    summary.memory_usage.insert(k.clone(), bytes);
+                }
+            }
+        }
+
+        summary
+    }
+
     /// Probe each known service's health endpoint and return status entries.
     pub async fn check(&self) -> Vec<ServiceStatus> {
         let mut statuses = Vec::new();
@@ -123,5 +169,15 @@ mod tests {
         for s in &statuses {
             assert!(s.port.is_some());
         }
+    }
+
+    #[tokio::test]
+    async fn fetch_agents_returns_default_when_unreachable() {
+        let checker = ServiceChecker::new("127.0.0.1").unwrap();
+        let agents = checker.fetch_agents().await;
+        // Daimon likely not running, should return defaults
+        assert_eq!(agents.total, 0);
+        assert_eq!(agents.running, 0);
+        assert!(agents.cpu_usage.is_empty());
     }
 }

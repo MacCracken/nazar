@@ -38,12 +38,15 @@ fn main() {
         .init();
 
     tracing::info!("Nazar system monitor starting");
-    tracing::info!("Connecting to daimon at {}", cli.api_url);
 
-    let config = NazarConfig {
-        api_url: cli.api_url.clone(),
-        ..NazarConfig::default()
-    };
+    // Load persisted config, then apply CLI overrides
+    let mut config = NazarConfig::load();
+    config.api_url = cli.api_url.clone();
+
+    if let Some(path) = NazarConfig::config_path() {
+        tracing::info!("Config: {}", path.display());
+    }
+    tracing::info!("Connecting to daimon at {}", config.api_url);
 
     let state = new_shared_state(config);
 

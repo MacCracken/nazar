@@ -36,9 +36,10 @@ pub async fn collector_loop(state: SharedState) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(current_poll_secs));
     tracing::info!("Collector started (poll every {current_poll_secs}s)");
 
-    // Check services less frequently (every 6th tick = ~30s at default 5s poll)
+    // Check services and agents less frequently (every 6th tick = ~30s at default 5s poll)
     let mut tick_count: u64 = 0;
     let mut cached_services = Vec::new();
+    let mut cached_agents = AgentSummary::default();
 
     loop {
         interval.tick().await;
@@ -68,14 +69,15 @@ pub async fn collector_loop(state: SharedState) {
             tracing::info!("Poll interval changed to {current_poll_secs}s");
         }
 
-        // Probe AGNOS services periodically
+        // Probe AGNOS services and fetch agent data periodically
         if tick_count % 6 == 1
             && let Some(ref checker) = service_checker
         {
             cached_services = checker.check().await;
+            cached_agents = checker.fetch_agents().await;
         }
 
-        let snapshot = reader.snapshot(AgentSummary::default(), cached_services.clone());
+        let snapshot = reader.snapshot(cached_agents.clone(), cached_services.clone());
 
         // Feed the anomaly detector
         let alerts = if show_anomalies {

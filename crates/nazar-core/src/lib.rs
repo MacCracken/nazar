@@ -3,6 +3,7 @@
 //! Named after the Arabic/Persian نظر (watchful eye).
 
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Utc};
@@ -312,6 +313,57 @@ impl Default for NazarConfig {
     }
 }
 
+impl NazarConfig {
+    /// Default config file path: `~/.config/nazar/config.json`.
+    pub fn config_path() -> Option<PathBuf> {
+        dirs_path().map(|d| d.join("config.json"))
+    }
+
+    /// Load config from the default path, falling back to defaults for missing fields.
+    /// Returns `Default` if the file doesn't exist or can't be parsed.
+    pub fn load() -> Self {
+        let Some(path) = Self::config_path() else {
+            return Self::default();
+        };
+        Self::load_from(&path)
+    }
+
+    /// Load config from a specific path.
+    pub fn load_from(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
+                tracing::warn!("Failed to parse config from {}: {e}", path.display());
+                Self::default()
+            }),
+            Err(_) => Self::default(),
+        }
+    }
+
+    /// Save config to the default path. Creates parent directories if needed.
+    pub fn save(&self) -> Result<(), String> {
+        let path = Self::config_path()
+            .ok_or_else(|| "Cannot determine config directory".to_string())?;
+        self.save_to(&path)
+    }
+
+    /// Save config to a specific path.
+    pub fn save_to(&self, path: &Path) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {e}"))?;
+        }
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize config: {e}"))?;
+        std::fs::write(path, json)
+            .map_err(|e| format!("Failed to write config to {}: {e}", path.display()))
+    }
+}
+
+/// Returns the nazar config directory: `~/.config/nazar/`.
+fn dirs_path() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config").join("nazar"))
+}
+
 // ---------------------------------------------------------------------------
 // Shared monitor state
 // ---------------------------------------------------------------------------
@@ -506,6 +558,43 @@ mod tests {
         assert_eq!(AlertSeverity::Info.to_string(), "INFO");
         assert_eq!(AlertSeverity::Warning.to_string(), "WARNING");
         assert_eq!(AlertSeverity::Critical.to_string(), "CRITICAL");
+    }
+
+    #[test]
+    fn config_save_and_load() {
+        let dir = std::env::temp_dir().join("nazar-test-config");
+        let path = dir.join("config.json");
+
+        let mut cfg = NazarConfig::default();
+        cfg.cpu_threshold = 75.0;
+        cfg.poll_interval_secs = 10;
+        cfg.save_to(&path).unwrap();
+
+        let loaded = NazarConfig::load_from(&path);
+        assert!((loaded.cpu_threshold - 75.0).abs() < f64::EPSILON);
+        assert_eq!(loaded.poll_interval_secs, 10);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_load_missing_file_returns_default() {
+        let cfg = NazarConfig::load_from(std::path::Path::new("/nonexistent/config.json"));
+        assert_eq!(cfg.poll_interval_secs, 5);
+    }
+
+    #[test]
+    fn config_load_invalid_json_returns_default() {
+        let dir = std::env::temp_dir().join("nazar-test-bad-config");
+        let path = dir.join("config.json");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "not valid json {{{").unwrap();
+
+        let cfg = NazarConfig::load_from(&path);
+        assert_eq!(cfg.poll_interval_secs, 5);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

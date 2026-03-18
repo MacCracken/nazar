@@ -53,9 +53,4 @@ All 23 items shipped. See [CHANGELOG.md](../CHANGELOG.md) for details.
 
 ## Engineering Backlog
 
-Low-severity items from code audit. Address as time permits.
-
-| # | Item | Notes |
-|---|------|-------|
-| 1 | Populate real agent data from daimon API | `AgentSummary` is always zeroed; needs daimon `/v1/agents` integration |
-| 2 | Config persistence to file | `NazarConfig` is serializable but never saved/loaded; changes lost on restart |
+No outstanding items.

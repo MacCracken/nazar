@@ -354,6 +354,10 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
                         }
                         _ => return ToolResult::err(&format!("Unknown config key: {k}")),
                     }
+                    // Persist config to disk
+                    if let Err(e) = s.config.save() {
+                        tracing::warn!("Failed to persist config: {e}");
+                    }
                     ToolResult::ok(serde_json::json!({ "updated": k, "value": v }))
                 }
                 _ => ToolResult::err("'key' and 'value' are required for set action"),
