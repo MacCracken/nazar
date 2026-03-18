@@ -46,6 +46,22 @@ pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricSt
         tracing::warn!("Invalid service host '{service_host}', service checks disabled");
     }
 
+    // Register MCP tools with daimon on startup
+    let nazar_port = {
+        let s = read_state(&state);
+        s.config.api_url.clone() // we'll use the nazar port below
+    };
+    if let Some(ref checker) = service_checker {
+        let registrations = nazar_mcp::tool_registrations();
+        // Use localhost since nazar and daimon are on the same host
+        let callback_base = "http://127.0.0.1:8095".to_string();
+        let count = checker.register_mcp_tools(&registrations, &callback_base).await;
+        if count > 0 {
+            tracing::info!("Registered {count} MCP tools with daimon");
+        }
+    }
+    let _ = nazar_port; // used for callback_base derivation above
+
     let mut current_poll_secs = poll_secs;
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(current_poll_secs));
     tracing::info!("Collector started (poll every {current_poll_secs}s)");
@@ -53,6 +69,7 @@ pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricSt
     let mut tick_count: u64 = 0;
     let mut cached_services = Vec::new();
     let mut cached_agents = AgentSummary::default();
+    let mut mcp_registered = service_checker.is_some();
 
     loop {
         interval.tick().await;
@@ -107,6 +124,42 @@ pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricSt
         } else {
             Vec::new()
         };
+
+        // AGNOS integration: LLM triage, alert notifications, process recommendations
+        let mut triage_text = None;
+        let mut recommendations_text = None;
+        if let Some(ref checker) = service_checker {
+            // Publish alerts to daimon's event bus for desktop notifications
+            if !alerts.is_empty() {
+                checker.publish_alerts(&alerts).await;
+            }
+
+            // LLM triage for new alerts (every 12th tick to avoid spamming hoosh)
+            if !alerts.is_empty() && tick_count.is_multiple_of(12)
+                && let Some(first_alert) = alerts.first()
+            {
+                triage_text = checker.triage_alert(first_alert).await;
+            }
+
+            // Process recommendations periodically (every 60th tick = ~5 min)
+            if tick_count.is_multiple_of(60) {
+                recommendations_text = checker.get_process_recommendations(
+                    &snapshot.top_processes,
+                    snapshot.memory.used_percent(),
+                    snapshot.cpu.total_percent,
+                ).await;
+            }
+
+            // Re-register MCP tools if initial registration failed
+            if !mcp_registered && tick_count.is_multiple_of(12) {
+                let registrations = nazar_mcp::tool_registrations();
+                let count = checker.register_mcp_tools(&registrations, "http://127.0.0.1:8095").await;
+                if count > 0 {
+                    mcp_registered = true;
+                    tracing::info!("Registered {count} MCP tools with daimon (retry)");
+                }
+            }
+        }
 
         // Persist to SQLite every ~1 min
         if tick_count.is_multiple_of(12)
@@ -176,6 +229,12 @@ pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricSt
             s.predictions = predictions;
             if !correlations.is_empty() {
                 s.correlations = correlations;
+            }
+            if let Some(t) = triage_text {
+                s.last_triage = Some(t);
+            }
+            if let Some(r) = recommendations_text {
+                s.last_recommendations = Some(r);
             }
             s.latest = Some(snapshot);
         }

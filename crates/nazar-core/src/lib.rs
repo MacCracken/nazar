@@ -270,6 +270,14 @@ pub enum Trend {
     Falling,
 }
 
+/// Tool registration payload for daimon's MCP registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolRegistration {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+}
+
 // ---------------------------------------------------------------------------
 // Time series
 // ---------------------------------------------------------------------------
@@ -456,6 +464,10 @@ pub struct MonitorState {
     pub net_iface_history: HashMap<String, (TimeSeries, TimeSeries)>,
     pub config: NazarConfig,
     pub started_at: DateTime<Utc>,
+    /// LLM triage explanation for the most recent alert.
+    pub last_triage: Option<String>,
+    /// LLM process recommendations.
+    pub last_recommendations: Option<String>,
 }
 
 impl MonitorState {
@@ -474,6 +486,8 @@ impl MonitorState {
             net_iface_history: HashMap::new(),
             config,
             started_at: Utc::now(),
+            last_triage: None,
+            last_recommendations: None,
         }
     }
 

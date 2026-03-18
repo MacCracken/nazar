@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **AGNOS integration** — full integration with daimon and hoosh
+  - **MCP tool registration**: registers 5 nazar tools with daimon's `/v1/mcp/tools` on startup, with HTTP callback endpoint `/v1/mcp/call`
+  - **Agent detail view**: UI panel showing per-agent CPU/memory breakdown from daimon `/v1/agents`
+  - **LLM-assisted triage**: forwards alerts to hoosh `/v1/chat/completions` for NL explanation
+  - **Process recommendations**: sends top processes to hoosh for analysis every ~5 min
+  - **Alert notifications**: publishes alerts to daimon event bus (`/v1/events/publish`, topic `nazar.alerts`) for desktop notification
+  - **agnoshi discoverability**: MCP tools registered in daimon are discoverable by agnoshi shell
+  - All integrations gracefully degrade when services are unavailable
+  - Auto-retries MCP registration if daimon starts after nazar
+- **AI Insights UI panel** — displays LLM triage explanations and process recommendations when available
 - **Multi-metric capacity planning** — predicts exhaustion for CPU, memory, and all disk mounts
   - Generalized `predict_metric()` with configurable target thresholds
   - 95% confidence intervals via standard error of the regression slope
@@ -84,7 +94,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Octal escape decoding** — `/proc/mounts` paths with `\040` (space), `\011` (tab) etc. are decoded correctly
 - **Agent data from daimon** — `ServiceChecker::fetch_agents()` queries daimon `/v1/agents` for real agent counts, CPU, and memory usage. Falls back to defaults when unreachable
 - **Config persistence** — `NazarConfig::load()`/`save()` to `~/.config/nazar/config.json`. Loaded on startup (CLI `--api-url` overrides). MCP config `set` auto-persists changes
-- **87 tests** across 6 crates (up from 27)
+- **89 tests** across 6 crates (up from 27)
   - Config validation: zero poll interval, low refresh rate, out-of-range thresholds, NaN, unknown keys, boolean validation
   - Service checker: host validation, known services, async probing, agent fetch fallback
   - Network delta computation, TimeSeries zero-max-points edge case

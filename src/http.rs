@@ -5,7 +5,7 @@ use std::fmt::Write;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
-use axum::routing::get;
+use axum::routing::{get, post};
 use tower_http::cors::{Any, CorsLayer};
 
 use nazar_core::*;
@@ -25,6 +25,7 @@ pub fn router(state: SharedState) -> axum::Router {
         .route("/v1/processes", get(api_processes))
         .route("/v1/correlations", get(api_correlations))
         .route("/metrics", get(api_prometheus))
+        .route("/v1/mcp/call", post(api_mcp_call))
         .layer(cors)
         .with_state(state)
 }
@@ -206,4 +207,18 @@ async fn api_prometheus(State(state): State<SharedState>) -> impl IntoResponse {
         [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
         out,
     )
+}
+
+/// MCP tool call callback — daimon dispatches tool calls here.
+async fn api_mcp_call(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let arguments = body.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+    let result = nazar_mcp::execute_tool(name, &arguments, &state);
+    Json(serde_json::json!({
+        "content": [{"type": "text", "text": serde_json::to_string(&result.content).unwrap_or_default()}],
+        "isError": result.is_error,
+    }))
 }

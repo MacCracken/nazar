@@ -361,6 +361,81 @@ impl NazarApp {
         });
     }
 
+    fn draw_agents_panel(&self, ui: &mut egui::Ui, snap: &SystemSnapshot) {
+        let agents = &snap.agents;
+        if agents.total == 0 {
+            return;
+        }
+        ui.group(|ui| {
+            ui.heading("Agents");
+            ui.label(format!(
+                "Total: {}  Running: {}  Idle: {}  Error: {}",
+                agents.total, agents.running, agents.idle, agents.error
+            ));
+
+            if !agents.cpu_usage.is_empty() || !agents.memory_usage.is_empty() {
+                egui::Grid::new("agent_grid")
+                    .striped(true)
+                    .min_col_width(80.0)
+                    .show(ui, |ui| {
+                        ui.strong("Agent");
+                        ui.strong("CPU %");
+                        ui.strong("Memory");
+                        ui.end_row();
+
+                        // Merge CPU and memory maps
+                        let mut agent_ids: Vec<&String> = agents.cpu_usage.keys()
+                            .chain(agents.memory_usage.keys())
+                            .collect::<std::collections::HashSet<_>>()
+                            .into_iter()
+                            .collect();
+                        agent_ids.sort();
+
+                        for id in agent_ids {
+                            ui.label(id);
+                            if let Some(cpu) = agents.cpu_usage.get(id) {
+                                ui.label(format!("{:.1}", cpu));
+                            } else {
+                                ui.label("-");
+                            }
+                            if let Some(mem) = agents.memory_usage.get(id) {
+                                ui.label(format!("{:.1} MB", *mem as f64 / 1e6));
+                            } else {
+                                ui.label("-");
+                            }
+                            ui.end_row();
+                        }
+                    });
+            }
+        });
+    }
+
+    fn draw_ai_insights_panel(
+        &self,
+        ui: &mut egui::Ui,
+        triage: &Option<String>,
+        recommendations: &Option<String>,
+    ) {
+        if triage.is_none() && recommendations.is_none() {
+            return;
+        }
+        ui.group(|ui| {
+            ui.heading("AI Insights");
+            if let Some(t) = triage {
+                ui.label("Alert Triage:");
+                ui.indent("triage", |ui| {
+                    ui.label(t);
+                });
+            }
+            if let Some(r) = recommendations {
+                ui.label("Process Recommendations:");
+                ui.indent("recs", |ui| {
+                    ui.label(r);
+                });
+            }
+        });
+    }
+
     fn draw_processes_panel(&self, ui: &mut egui::Ui, snap: &SystemSnapshot) {
         ui.group(|ui| {
             ui.heading("Top Processes");
@@ -452,7 +527,7 @@ impl eframe::App for NazarApp {
             }
 
             // Clone all needed data out of the lock to avoid holding it during rendering
-            let (snap, cpu_data, mem_data, iface_history, predictions, poll_secs) = {
+            let (snap, cpu_data, mem_data, iface_history, predictions, poll_secs, triage, recommendations) = {
                 let s = read_state(&self.state);
                 let snap = s.latest.clone().unwrap();
                 let cpu_data = s.cpu_history.last_n(120);
@@ -464,7 +539,9 @@ impl eframe::App for NazarApp {
                     .collect();
                 let predictions = s.predictions.clone();
                 let poll_secs = s.config.poll_interval_secs;
-                (snap, cpu_data, mem_data, iface_history, predictions, poll_secs)
+                let triage = s.last_triage.clone();
+                let recommendations = s.last_recommendations.clone();
+                (snap, cpu_data, mem_data, iface_history, predictions, poll_secs, triage, recommendations)
             };
 
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -486,12 +563,17 @@ impl eframe::App for NazarApp {
                 self.draw_processes_panel(ui, &snap);
 
                 ui.add_space(8.0);
+                self.draw_agents_panel(ui, &snap);
+
+                ui.add_space(8.0);
                 self.draw_services_panel(ui, &snap);
 
                 if !predictions.is_empty() {
                     ui.add_space(8.0);
                     self.draw_predictions_panel(ui, &predictions, poll_secs);
                 }
+
+                self.draw_ai_insights_panel(ui, &triage, &recommendations);
             });
         });
 

@@ -35,6 +35,18 @@ impl ToolResult {
     }
 }
 
+/// Get tool registration payloads for daimon's MCP registry.
+pub fn tool_registrations() -> Vec<nazar_core::ToolRegistration> {
+    tool_definitions()
+        .into_iter()
+        .map(|t| nazar_core::ToolRegistration {
+            name: t.name,
+            description: t.description,
+            input_schema: t.input_schema,
+        })
+        .collect()
+}
+
 /// Get the 5 Nazar MCP tool definitions.
 pub fn tool_definitions() -> Vec<ToolDescription> {
     vec![
