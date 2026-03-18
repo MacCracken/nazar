@@ -20,6 +20,7 @@ pub fn router(state: SharedState) -> axum::Router {
         .route("/v1/snapshot", get(api_snapshot))
         .route("/v1/alerts", get(api_alerts))
         .route("/v1/predict", get(api_predict))
+        .route("/v1/processes", get(api_processes))
         .layer(cors)
         .with_state(state)
 }
@@ -65,4 +66,18 @@ async fn api_predict(State(state): State<SharedState>) -> Json<serde_json::Value
     Json(serde_json::json!({
         "predictions": s.predictions,
     }))
+}
+
+async fn api_processes(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = read_state(&state);
+    match &s.latest {
+        Some(snap) => (StatusCode::OK, Json(serde_json::json!({
+            "count": snap.top_processes.len(),
+            "processes": snap.top_processes,
+        }))),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "No snapshot available yet"})),
+        ),
+    }
 }

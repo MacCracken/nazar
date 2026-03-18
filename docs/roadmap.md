@@ -12,8 +12,9 @@ All 23 items shipped. See [CHANGELOG.md](../CHANGELOG.md) for details.
 - Metrics pipeline: tokio collector, shared state, anomaly detection, predictions
 - HTTP API: `/health`, `/v1/snapshot`, `/v1/alerts`, `/v1/predict` on port 8095
 - MCP tool handlers: `nazar_dashboard`, `nazar_alerts`, `nazar_predict`, `nazar_history`, `nazar_config`
-- GUI dashboard: CPU/memory sparklines, disk/network panels, alerts with timestamps, live service status
-- 56 tests, 0 clippy warnings
+- GUI dashboard: CPU/memory sparklines, disk/network panels, alerts with timestamps, live service status, top processes
+- Per-process CPU/memory: delta-based CPU%, RSS memory, state, thread count via /proc/[pid]/stat + statm
+- 67 tests, 0 clippy warnings
 
 ---
 
@@ -21,7 +22,7 @@ All 23 items shipped. See [CHANGELOG.md](../CHANGELOG.md) for details.
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1 | Per-process CPU/memory | Not started | Read /proc/[pid]/stat for top-N processes |
+| 1 | Per-process CPU/memory | **Done** | Delta-based CPU%, RSS memory, threads via /proc/[pid]/stat + statm |
 | 2 | Disk I/O throughput | Not started | Read /proc/diskstats for IOPS and read/write rates |
 | 3 | Network traffic time series | Not started | Per-interface rx/tx rate graphs over time |
 | 4 | GPU monitoring | Not started | NVIDIA (nvidia-smi) and AMD (amdgpu) |

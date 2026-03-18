@@ -82,12 +82,13 @@ impl NazarApp {
             ui.heading("CPU");
             ui.horizontal(|ui| {
                 ui.label(format!(
-                    "Usage: {:.1}%  |  Load: {:.2} / {:.2} / {:.2}  |  Running: {}",
+                    "Usage: {:.1}%  |  Load: {:.2} / {:.2} / {:.2}  |  Procs: {}  Threads: {}",
                     snap.cpu.total_percent,
                     snap.cpu.load_average[0],
                     snap.cpu.load_average[1],
                     snap.cpu.load_average[2],
                     snap.cpu.processes,
+                    snap.cpu.threads,
                 ));
             });
             ui.add(
@@ -259,6 +260,40 @@ impl NazarApp {
         });
     }
 
+    fn draw_processes_panel(&self, ui: &mut egui::Ui, snap: &SystemSnapshot) {
+        ui.group(|ui| {
+            ui.heading("Top Processes");
+            if snap.top_processes.is_empty() {
+                ui.label("No process data");
+                return;
+            }
+            egui::Grid::new("proc_grid")
+                .striped(true)
+                .min_col_width(60.0)
+                .show(ui, |ui| {
+                    ui.strong("PID");
+                    ui.strong("Name");
+                    ui.strong("CPU %");
+                    ui.strong("Memory");
+                    ui.strong("Mem %");
+                    ui.strong("State");
+                    ui.strong("Threads");
+                    ui.end_row();
+
+                    for p in &snap.top_processes {
+                        ui.label(p.pid.to_string());
+                        ui.label(&p.name);
+                        ui.label(format!("{:.1}", p.cpu_percent));
+                        ui.label(format!("{:.1} MB", p.memory_bytes as f64 / 1e6));
+                        ui.label(format!("{:.1}", p.memory_percent));
+                        ui.label(p.state.to_string());
+                        ui.label(p.threads.to_string());
+                        ui.end_row();
+                    }
+                });
+        });
+    }
+
     fn draw_predictions_panel(&self, ui: &mut egui::Ui, predictions: &[PredictionResult], poll_secs: u64) {
         ui.group(|ui| {
             ui.heading("Predictions");
@@ -336,6 +371,9 @@ impl eframe::App for NazarApp {
                     self.draw_disk_panel(&mut cols[0], &snap);
                     self.draw_network_panel(&mut cols[1], &snap);
                 });
+
+                ui.add_space(8.0);
+                self.draw_processes_panel(ui, &snap);
 
                 ui.add_space(8.0);
                 self.draw_services_panel(ui, &snap);

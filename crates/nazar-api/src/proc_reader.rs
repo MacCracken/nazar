@@ -37,19 +37,46 @@ struct NetCounters {
     total_tx: u64,
 }
 
+/// Per-process CPU time counters from /proc/[pid]/stat.
+#[derive(Debug, Clone, Default)]
+struct ProcCpuTimes {
+    utime: u64,
+    stime: u64,
+}
+
+impl ProcCpuTimes {
+    fn total(&self) -> u64 {
+        self.utime + self.stime
+    }
+}
+
 /// Reads system metrics from /proc on Linux.
 ///
-/// Holds previous CPU and network readings so it can compute delta-based metrics.
+/// Holds previous CPU, network, and per-process readings for delta-based metrics.
 pub struct ProcReader {
     prev_cpu_times: Option<Vec<CpuTimes>>,
     prev_net: Option<NetCounters>,
+    prev_proc_times: HashMap<u32, ProcCpuTimes>,
+    /// System-wide total CPU delta from the last `read_cpu()` call.
+    last_system_cpu_delta: u64,
+    num_cores: usize,
+    page_size: u64,
+    /// Total threads from last `read_processes()` call.
+    total_threads: u64,
 }
 
 impl ProcReader {
     pub fn new() -> Self {
+        // SAFETY: sysconf(_SC_PAGESIZE) is always safe and returns a valid value.
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
         Self {
             prev_cpu_times: None,
             prev_net: None,
+            prev_proc_times: HashMap::new(),
+            last_system_cpu_delta: 0,
+            num_cores: 0,
+            page_size,
+            total_threads: 0,
         }
     }
 
@@ -62,11 +89,15 @@ impl ProcReader {
         let load_average = Self::parse_loadavg();
 
         let (total_percent, cores) = if let Some(ref prev) = self.prev_cpu_times {
+            // Store system-wide CPU delta for per-process CPU% calculation
+            self.last_system_cpu_delta = current[0].total().saturating_sub(prev[0].total());
             Self::compute_cpu_deltas(prev, &current)
         } else {
+            self.last_system_cpu_delta = 0;
             (0.0, vec![])
         };
 
+        self.num_cores = if current.len() > 1 { current.len() - 1 } else { 1 };
         self.prev_cpu_times = Some(current);
 
         CpuMetrics {
@@ -74,7 +105,7 @@ impl ProcReader {
             total_percent,
             load_average,
             processes: procs_running,
-            threads: 0, // thread count requires /proc/[pid] enumeration (v2)
+            threads: 0,
         }
     }
 
@@ -245,19 +276,132 @@ impl ProcReader {
         }
     }
 
+    /// Read top-N processes by CPU usage from /proc/[pid]/stat.
+    ///
+    /// Uses delta-based CPU calculation. First call returns 0% for all processes.
+    pub fn read_processes(&mut self, top_n: usize, total_mem_bytes: u64) -> Vec<ProcessInfo> {
+        if top_n == 0 {
+            return Vec::new();
+        }
+
+        let Ok(proc_dir) = std::fs::read_dir("/proc") else {
+            return Vec::new();
+        };
+
+        struct RawProc {
+            pid: u32,
+            name: String,
+            state: char,
+            utime: u64,
+            stime: u64,
+            num_threads: u64,
+        }
+
+        let mut current_procs = Vec::new();
+
+        for entry in proc_dir.flatten() {
+            let name = entry.file_name();
+            let Some(pid_str) = name.to_str() else { continue };
+            let Ok(pid) = pid_str.parse::<u32>() else { continue };
+
+            let stat_path = format!("/proc/{pid}/stat");
+            let Ok(content) = std::fs::read_to_string(&stat_path) else { continue };
+
+            // Parse comm field: find first '(' and last ')' to handle names with parens
+            let Some(comm_start) = content.find('(') else { continue };
+            let Some(comm_end) = content.rfind(')') else { continue };
+            if comm_end <= comm_start { continue; }
+
+            let proc_name = content[comm_start + 1..comm_end].to_string();
+            let rest = &content[comm_end + 2..]; // skip ") "
+            let fields: Vec<&str> = rest.split_whitespace().collect();
+            // fields[0] = state, fields[11] = utime, fields[12] = stime, fields[17] = num_threads
+            if fields.len() < 18 { continue; }
+
+            let state = fields[0].chars().next().unwrap_or('?');
+            let utime = fields[11].parse::<u64>().unwrap_or(0);
+            let stime = fields[12].parse::<u64>().unwrap_or(0);
+            let num_threads = fields[17].parse::<u64>().unwrap_or(0);
+
+            current_procs.push(RawProc { pid, name: proc_name, state, utime, stime, num_threads });
+        }
+
+        // Sum total threads across all processes
+        self.total_threads = current_procs.iter().map(|p| p.num_threads).sum();
+
+        // Compute CPU deltas for all processes, track all times for next tick
+        let sys_delta = self.last_system_cpu_delta as f64;
+        let mut new_prev = HashMap::with_capacity(current_procs.len());
+        let mut procs_with_cpu: Vec<ProcessInfo> = current_procs
+            .into_iter()
+            .map(|raw| {
+                let current_times = ProcCpuTimes { utime: raw.utime, stime: raw.stime };
+                let cpu_percent = if sys_delta > 0.0 {
+                    if let Some(prev) = self.prev_proc_times.get(&raw.pid) {
+                        let proc_delta = current_times.total().saturating_sub(prev.total());
+                        (proc_delta as f64 / sys_delta) * self.num_cores as f64 * 100.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+                new_prev.insert(raw.pid, current_times);
+
+                ProcessInfo {
+                    pid: raw.pid,
+                    name: raw.name,
+                    state: raw.state,
+                    cpu_percent,
+                    memory_bytes: 0,
+                    memory_percent: 0.0,
+                    threads: raw.num_threads,
+                }
+            })
+            .collect();
+
+        self.prev_proc_times = new_prev;
+
+        // Sort by CPU descending, take top-N
+        procs_with_cpu.sort_by(|a, b| b.cpu_percent.partial_cmp(&a.cpu_percent).unwrap_or(std::cmp::Ordering::Equal));
+        procs_with_cpu.truncate(top_n);
+
+        // Read memory only for top-N (read /proc/[pid]/statm)
+        for proc in &mut procs_with_cpu {
+            let statm_path = format!("/proc/{}/statm", proc.pid);
+            if let Ok(content) = std::fs::read_to_string(&statm_path)
+                && let Some(rss_str) = content.split_whitespace().nth(1)
+                && let Ok(rss_pages) = rss_str.parse::<u64>()
+            {
+                proc.memory_bytes = rss_pages * self.page_size;
+                if total_mem_bytes > 0 {
+                    proc.memory_percent = (proc.memory_bytes as f64 / total_mem_bytes as f64) * 100.0;
+                }
+            }
+        }
+
+        procs_with_cpu
+    }
+
     /// Assemble a full SystemSnapshot from all local /proc readers.
     ///
     /// `agents` and `services` are passed in (they come from the daimon API,
     /// not from /proc).
-    pub fn snapshot(&mut self, agents: AgentSummary, services: Vec<ServiceStatus>) -> SystemSnapshot {
+    pub fn snapshot(&mut self, agents: AgentSummary, services: Vec<ServiceStatus>, top_n: usize) -> SystemSnapshot {
+        let mut cpu = self.read_cpu();
+        let memory = self.read_memory();
+        let top_processes = self.read_processes(top_n, memory.total_bytes);
+        cpu.threads = self.total_threads;
         SystemSnapshot {
             timestamp: chrono::Utc::now(),
-            cpu: self.read_cpu(),
-            memory: self.read_memory(),
+            cpu,
+            memory,
             disk: self.read_disk(),
             network: self.read_network(),
             agents,
             services,
+            top_processes,
         }
     }
 
@@ -512,8 +656,56 @@ mod tests {
     #[test]
     fn snapshot_assembles() {
         let mut reader = ProcReader::new();
-        let snap = reader.snapshot(AgentSummary::default(), vec![]);
+        let snap = reader.snapshot(AgentSummary::default(), vec![], 5);
         assert!(snap.memory.total_bytes > 0 || !cfg!(target_os = "linux"));
+    }
+
+    #[test]
+    fn read_processes_returns_entries() {
+        let mut reader = ProcReader::new();
+        reader.read_cpu(); // prime system CPU delta
+        let procs = reader.read_processes(10, 16_000_000_000);
+        if cfg!(target_os = "linux") {
+            assert!(!procs.is_empty(), "expected at least one process on Linux");
+            for p in &procs {
+                assert!(p.pid > 0);
+                assert!(!p.name.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn read_processes_respects_top_n() {
+        let mut reader = ProcReader::new();
+        reader.read_cpu();
+        let procs = reader.read_processes(3, 16_000_000_000);
+        assert!(procs.len() <= 3);
+    }
+
+    #[test]
+    fn read_processes_second_call_has_cpu() {
+        let mut reader = ProcReader::new();
+        reader.read_cpu();
+        let _ = reader.read_processes(10, 16_000_000_000);
+        // Second read with fresh CPU delta
+        reader.read_cpu();
+        let procs = reader.read_processes(10, 16_000_000_000);
+        // At least one process should have >= 0 CPU (can't assert > 0 deterministically)
+        for p in &procs {
+            assert!(p.cpu_percent >= 0.0);
+            assert!(p.cpu_percent <= 100.0 * reader.num_cores as f64);
+        }
+    }
+
+    #[test]
+    fn read_processes_has_memory() {
+        let mut reader = ProcReader::new();
+        reader.read_cpu();
+        let procs = reader.read_processes(5, 16_000_000_000);
+        if cfg!(target_os = "linux") {
+            // At least one process should have non-zero memory
+            assert!(procs.iter().any(|p| p.memory_bytes > 0));
+        }
     }
 
     #[test]

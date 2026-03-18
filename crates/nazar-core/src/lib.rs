@@ -23,6 +23,19 @@ pub struct SystemSnapshot {
     pub network: NetworkMetrics,
     pub agents: AgentSummary,
     pub services: Vec<ServiceStatus>,
+    pub top_processes: Vec<ProcessInfo>,
+}
+
+/// Per-process resource usage (top-N by CPU).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub name: String,
+    pub state: char,
+    pub cpu_percent: f64,
+    pub memory_bytes: u64,
+    pub memory_percent: f64,
+    pub threads: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -295,6 +308,8 @@ pub struct NazarConfig {
     pub memory_threshold: f64,
     /// Disk usage threshold for anomaly alerts (0.0–100.0).
     pub disk_threshold: f64,
+    /// Number of top processes to track by CPU usage.
+    pub top_processes: usize,
 }
 
 impl Default for NazarConfig {
@@ -309,6 +324,7 @@ impl Default for NazarConfig {
             cpu_threshold: 90.0,
             memory_threshold: 85.0,
             disk_threshold: 90.0,
+            top_processes: 10,
         }
     }
 }

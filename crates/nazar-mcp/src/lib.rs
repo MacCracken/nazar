@@ -142,6 +142,15 @@ fn handle_dashboard(state: &SharedState) -> ToolResult {
                 "running": snap.agents.running,
                 "error": snap.agents.error,
             },
+            "top_processes": snap.top_processes.iter().map(|p| serde_json::json!({
+                "pid": p.pid,
+                "name": p.name,
+                "cpu_percent": p.cpu_percent,
+                "memory_mb": p.memory_bytes as f64 / 1e6,
+                "memory_percent": p.memory_percent,
+                "state": p.state.to_string(),
+                "threads": p.threads,
+            })).collect::<Vec<_>>(),
             "alerts_count": s.alerts.len(),
         })),
         None => ToolResult::err("No snapshot available yet"),
@@ -305,6 +314,7 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
                 "cpu_threshold": s.config.cpu_threshold,
                 "memory_threshold": s.config.memory_threshold,
                 "disk_threshold": s.config.disk_threshold,
+                "top_processes": s.config.top_processes,
             }))
         }
         "set" => {
@@ -350,6 +360,13 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
                                 }
                                 Ok(_) => return ToolResult::err(&format!("{k} must be a finite number between 0.0 and 100.0")),
                                 Err(_) => return ToolResult::err(&format!("Invalid value for {k}")),
+                            }
+                        }
+                        "top_processes" => {
+                            match v.parse::<usize>() {
+                                Ok(n) if (1..=50).contains(&n) => s.config.top_processes = n,
+                                Ok(_) => return ToolResult::err("top_processes must be between 1 and 50"),
+                                Err(_) => return ToolResult::err("Invalid value for top_processes"),
                             }
                         }
                         _ => return ToolResult::err(&format!("Unknown config key: {k}")),

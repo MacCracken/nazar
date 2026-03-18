@@ -245,6 +245,7 @@ mod tests {
                 memory_usage: HashMap::new(),
             },
             services: vec![],
+            top_processes: vec![],
         }
     }
 

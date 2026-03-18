@@ -77,7 +77,11 @@ pub async fn collector_loop(state: SharedState) {
             cached_agents = checker.fetch_agents().await;
         }
 
-        let snapshot = reader.snapshot(cached_agents.clone(), cached_services.clone());
+        let top_n = {
+            let s = read_state(&state);
+            s.config.top_processes
+        };
+        let snapshot = reader.snapshot(cached_agents.clone(), cached_services.clone(), top_n);
 
         // Feed the anomaly detector
         let alerts = if show_anomalies {

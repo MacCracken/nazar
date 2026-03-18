@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Per-process CPU/memory monitoring** — top-N processes by CPU usage
+  - `ProcessInfo` struct: pid, name, state, cpu_percent (delta-based), memory_bytes (RSS), memory_percent, threads
+  - `ProcReader::read_processes()` enumerates `/proc/[pid]/stat` and `/proc/[pid]/statm`
+  - Delta-based CPU% per process using same pattern as per-core CPU
+  - Tracks all PIDs' CPU times for accurate ranking across ticks
+  - Only reads memory (`/proc/[pid]/statm`) for top-N processes (performance)
+  - System-wide thread count populated from process enumeration
+  - GUI: "Top Processes" grid panel with PID, name, CPU%, memory, state, threads
+  - HTTP API: `GET /v1/processes` endpoint + included in `/v1/snapshot`
+  - MCP: `nazar_dashboard` includes `top_processes` array
+  - Config: `top_processes` (default 10, range 1-50) settable via MCP
 - **Live service status** — probes daimon (8090) and hoosh (8088) health endpoints every ~30s
   - `ServiceChecker` struct with reusable HTTP client and host validation
   - Shows Running/Failed/Stopped state with uptime and port in GUI
@@ -26,7 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Octal escape decoding** — `/proc/mounts` paths with `\040` (space), `\011` (tab) etc. are decoded correctly
 - **Agent data from daimon** — `ServiceChecker::fetch_agents()` queries daimon `/v1/agents` for real agent counts, CPU, and memory usage. Falls back to defaults when unreachable
 - **Config persistence** — `NazarConfig::load()`/`save()` to `~/.config/nazar/config.json`. Loaded on startup (CLI `--api-url` overrides). MCP config `set` auto-persists changes
-- **63 tests** across all crates (up from 27)
+- **67 tests** across all crates (up from 27)
   - Config validation: zero poll interval, low refresh rate, out-of-range thresholds, NaN, unknown keys, boolean validation
   - Service checker: host validation, known services, async probing, agent fetch fallback
   - Network delta computation, TimeSeries zero-max-points edge case
