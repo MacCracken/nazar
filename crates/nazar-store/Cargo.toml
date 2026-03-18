@@ -1,0 +1,13 @@
+[package]
+name = "nazar-store"
+version = "2026.3.17"
+edition = "2024"
+description = "SQLite persistence for Nazar system monitor"
+license = "GPL-3.0"
+
+[dependencies]
+nazar-core = { path = "../nazar-core" }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }

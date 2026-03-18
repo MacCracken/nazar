@@ -6,6 +6,7 @@ members = [
     "crates/nazar-ui",
     "crates/nazar-ai",
     "crates/nazar-mcp",
+    "crates/nazar-store",
 ]
 
 [workspace.dependencies]
@@ -23,6 +24,7 @@ eframe = { version = "0.33", default-features = false, features = ["default_font
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors"] }
 libc = "0.2"
+rusqlite = { version = "0.34", features = ["bundled"] }
 egui_plot = "0.34"
 
 [package]
@@ -37,6 +39,8 @@ nazar-core = { path = "crates/nazar-core" }
 nazar-api = { path = "crates/nazar-api" }
 nazar-ui = { path = "crates/nazar-ui" }
 nazar-ai = { path = "crates/nazar-ai" }
+nazar-mcp = { path = "crates/nazar-mcp" }
+nazar-store = { path = "crates/nazar-store" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

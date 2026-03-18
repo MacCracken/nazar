@@ -239,6 +239,28 @@ pub struct PredictionResult {
     /// How many polling intervals until the predicted value is reached.
     pub intervals_until: u64,
     pub trend: Trend,
+    /// 95% confidence interval lower bound (intervals).
+    pub confidence_low: Option<u64>,
+    /// 95% confidence interval upper bound (intervals).
+    pub confidence_high: Option<u64>,
+}
+
+/// Cross-metric correlation result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelationResult {
+    pub metric_a: String,
+    pub metric_b: String,
+    /// Pearson correlation coefficient (-1.0 to 1.0).
+    pub coefficient: f64,
+    pub strength: CorrelationStrength,
+    pub sample_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CorrelationStrength {
+    Strong,
+    Moderate,
+    Weak,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -424,6 +446,7 @@ pub struct MonitorState {
     pub latest: Option<SystemSnapshot>,
     pub alerts: Vec<Alert>,
     pub predictions: Vec<PredictionResult>,
+    pub correlations: Vec<CorrelationResult>,
     pub cpu_history: TimeSeries,
     pub mem_history: TimeSeries,
     pub disk_history: HashMap<String, TimeSeries>,
@@ -442,6 +465,7 @@ impl MonitorState {
             latest: None,
             alerts: Vec::new(),
             predictions: Vec::new(),
+            correlations: Vec::new(),
             cpu_history: TimeSeries::new("CPU", "%", max),
             mem_history: TimeSeries::new("Memory", "%", max),
             disk_history: HashMap::new(),

@@ -1,25 +1,39 @@
 //! Metrics collector — polls /proc and daimon, feeds anomaly detector.
 
-use nazar_ai::AnomalyDetector;
+use std::sync::{Arc, Mutex};
+
+use nazar_ai::{AnomalyDetector, CorrelationDetector};
 use nazar_api::{ProcReader, ServiceChecker};
 use nazar_core::*;
+use nazar_store::MetricStore;
 
 /// Run the metrics collection loop. Reads system metrics, checks for anomalies,
 /// probes AGNOS services, and writes everything to shared state.
-pub async fn collector_loop(state: SharedState) {
+pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricStore>>>) {
     let mut reader = ProcReader::new();
 
-    let (mut detector, poll_secs, api_url) = {
+    let (mut detector, mut correlation_detector, poll_secs, api_url) = {
         let s = read_state(&state);
         let detector = AnomalyDetector::from_config(&s.config);
-        (detector, s.config.poll_interval_secs, s.config.api_url.clone())
+        let correlation_detector = CorrelationDetector::new();
+        (detector, correlation_detector, s.config.poll_interval_secs, s.config.api_url.clone())
     };
+
+    // Load historical snapshots into detectors if store available
+    if let Some(ref store) = store
+        && let Ok(s) = store.lock()
+        && let Ok(snaps) = s.load_recent_snapshots(100)
+    {
+        for snap in snaps {
+            correlation_detector.record(&snap);
+            detector.record(snap);
+        }
+    }
 
     // Take an initial reading so the next one can compute CPU and network deltas
     let _warmup = reader.read_cpu();
     let _warmup_net = reader.read_network();
 
-    // Extract host from api_url for service checks
     let service_host = api_url
         .trim_start_matches("http://")
         .trim_start_matches("https://")
@@ -36,7 +50,6 @@ pub async fn collector_loop(state: SharedState) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(current_poll_secs));
     tracing::info!("Collector started (poll every {current_poll_secs}s)");
 
-    // Check services and agents less frequently (every 6th tick = ~30s at default 5s poll)
     let mut tick_count: u64 = 0;
     let mut cached_services = Vec::new();
     let mut cached_agents = AgentSummary::default();
@@ -45,7 +58,6 @@ pub async fn collector_loop(state: SharedState) {
         interval.tick().await;
         tick_count += 1;
 
-        // Refresh config on each tick
         let show_anomalies;
         let mut poll_changed = false;
         {
@@ -62,14 +74,12 @@ pub async fn collector_loop(state: SharedState) {
                 poll_changed = true;
             }
         }
-        // Re-create interval outside the lock scope (tick().await is not Send with guard held)
         if poll_changed {
             interval = tokio::time::interval(std::time::Duration::from_secs(current_poll_secs));
-            interval.tick().await; // consume the immediate first tick
+            interval.tick().await;
             tracing::info!("Poll interval changed to {current_poll_secs}s");
         }
 
-        // Probe AGNOS services and fetch agent data periodically
         if tick_count % 6 == 1
             && let Some(ref checker) = service_checker
         {
@@ -83,31 +93,50 @@ pub async fn collector_loop(state: SharedState) {
         };
         let snapshot = reader.snapshot(cached_agents.clone(), cached_services.clone(), top_n);
 
-        // Feed the anomaly detector
         let alerts = if show_anomalies {
             detector.check(&snapshot)
         } else {
             Vec::new()
         };
         detector.record(snapshot.clone());
+        correlation_detector.record(&snapshot);
 
-        // Update predictions
-        let predictions = detector
-            .predict_memory_exhaustion()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let predictions = detector.predict_all();
+        let correlations = if tick_count.is_multiple_of(12) {
+            correlation_detector.compute()
+        } else {
+            Vec::new()
+        };
+
+        // Persist to SQLite every ~1 min
+        if tick_count.is_multiple_of(12)
+            && let Some(ref store) = store
+            && let Ok(s) = store.lock()
+        {
+            if let Err(e) = s.write_snapshot(&snapshot) {
+                tracing::warn!("Failed to persist snapshot: {e}");
+            }
+            if !alerts.is_empty()
+                && let Err(e) = s.write_alerts(&alerts)
+            {
+                tracing::warn!("Failed to persist alerts: {e}");
+            }
+            if !predictions.is_empty()
+                && let Err(e) = s.write_predictions(&predictions)
+            {
+                tracing::warn!("Failed to persist predictions: {e}");
+            }
+        }
 
         // Write to shared state
         {
             let mut s = write_state(&state);
             s.cpu_history.push(snapshot.cpu.total_percent);
             s.mem_history.push(snapshot.memory.used_percent());
-            // Convert bytes-per-interval to bytes-per-second
             let poll = s.config.poll_interval_secs.max(1) as f64;
             s.net_rx_history.push(snapshot.network.total_rx_bytes as f64 / poll);
             s.net_tx_history.push(snapshot.network.total_tx_bytes as f64 / poll);
 
-            // Per-interface network history
             let max = s.config.max_history_points;
             for iface in &snapshot.network.interfaces {
                 if iface.name == "lo" {
@@ -122,16 +151,12 @@ pub async fn collector_loop(state: SharedState) {
                 rx_hist.push(iface.rx_bytes as f64 / poll);
                 tx_hist.push(iface.tx_bytes as f64 / poll);
             }
-            // Prune history for interfaces that disappeared
             let current_ifaces: std::collections::HashSet<&str> =
                 snapshot.network.interfaces.iter().map(|i| i.name.as_str()).collect();
             s.net_iface_history.retain(|k, _| current_ifaces.contains(k.as_str()));
 
-            let max = s.config.max_history_points;
-            // Collect current mount points
             let current_mounts: std::collections::HashSet<&str> =
                 snapshot.disk.iter().map(|d| d.mount_point.as_str()).collect();
-            // Remove history for unmounted filesystems
             s.disk_history.retain(|k, _| current_mounts.contains(k.as_str()));
             for disk in &snapshot.disk {
                 s.disk_history
@@ -149,6 +174,9 @@ pub async fn collector_loop(state: SharedState) {
             }
 
             s.predictions = predictions;
+            if !correlations.is_empty() {
+                s.correlations = correlations;
+            }
             s.latest = Some(snapshot);
         }
     }

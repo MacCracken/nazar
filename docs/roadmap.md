@@ -1,6 +1,6 @@
 # Nazar Development Roadmap
 
-> **Status**: v1 MVP complete | **Version**: 2026.3.17
+> **Status**: v1 MVP complete, v2-v4 largely complete | **Version**: 2026.3.17
 
 ---
 
@@ -16,7 +16,12 @@ All 23 items shipped. See [CHANGELOG.md](../CHANGELOG.md) for details.
 - Per-process CPU/memory: delta-based CPU%, RSS memory, state, thread count via /proc/[pid]/stat + statm
 - Temperature sensors, disk I/O throughput, per-interface network sparklines
 - GPU monitoring: AMD amdgpu (sysfs) + NVIDIA (nvidia-smi fallback)
-- 72 tests, 0 clippy warnings
+- Multi-metric capacity planning with confidence intervals
+- Cross-metric correlation detection (Pearson)
+- SQLite persistence (~/.local/share/nazar/metrics.db)
+- Prometheus export (`GET /metrics`)
+- MCP stdio transport (JSON-RPC 2.0)
+- 87 tests, 0 clippy warnings
 
 ---
 
@@ -29,31 +34,39 @@ All 23 items shipped. See [CHANGELOG.md](../CHANGELOG.md) for details.
 | 3 | Network traffic time series | **Done** | Per-interface rx/tx rate sparklines with history |
 | 4 | GPU monitoring | **Done** | AMD amdgpu via sysfs, NVIDIA via nvidia-smi fallback |
 | 5 | Temperature sensors | **Done** | /sys/class/thermal + /sys/class/hwmon with labels and critical thresholds |
-| 6 | Agent detail view | Not started | Click agent in UI to see per-agent resource breakdown |
-| 7 | MCP transport (stdio/HTTP) | Not started | Wire `nazar-mcp` handlers to a live MCP server |
-| 8 | AGNOS MCP tool registration | Not started | Register nazar_* tools in daimon's tool registry |
-| 9 | AGNOS agnoshi intents | Not started | NL commands: "show system status", "predict memory", etc. |
+| 6 | Agent detail view | Not started | Click agent in UI to see per-agent resource breakdown (requires AGNOS) |
+| 7 | MCP transport (stdio) | **Done** | JSON-RPC 2.0 over stdin/stdout via `--mcp` flag |
+| 8 | AGNOS MCP tool registration | Not started | Register nazar_* tools in daimon's tool registry (requires AGNOS) |
+| 9 | AGNOS agnoshi intents | Not started | NL commands: "show system status", "predict memory" (requires AGNOS) |
 
 ## v3 — AI Features
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1 | LLM-assisted triage | Not started | Route alerts through hoosh for NL explanation |
-| 2 | Process recommendations | Not started | "Agent X is using 3x normal memory — likely leak" |
-| 3 | Capacity planning | Not started | Multi-metric prediction with confidence intervals |
-| 4 | Correlation detection | Not started | "Disk I/O spike correlates with agent Y's file operations" |
+| 1 | LLM-assisted triage | Not started | Route alerts through hoosh for NL explanation (requires AGNOS) |
+| 2 | Process recommendations | Not started | "Agent X is using 3x normal memory — likely leak" (requires AGNOS) |
+| 3 | Capacity planning | **Done** | Multi-metric (CPU, memory, disk) prediction with 95% confidence intervals |
+| 4 | Correlation detection | **Done** | Pearson r for CPU/disk_io, CPU/net_tx, memory/swap, memory/net_rx |
 
 ## v4 — Polish
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | 1 | Configurable dashboard layouts | Not started | Drag-and-drop widget arrangement |
-| 2 | Alert notifications | Not started | Desktop notifications via aethersafha |
-| 3 | Historical data persistence | Not started | SQLite for long-term metric storage |
-| 4 | Export to Prometheus | Not started | `/metrics` endpoint in Prometheus format |
+| 2 | Alert notifications | Not started | Desktop notifications via aethersafha (requires AGNOS) |
+| 3 | Historical data persistence | **Done** | SQLite WAL mode, auto-prune 30 days, `--db-path` CLI flag |
+| 4 | Export to Prometheus | **Done** | `GET /metrics` endpoint in Prometheus text exposition format |
 
 ---
 
-## Engineering Backlog
+## Remaining (requires AGNOS ecosystem)
 
-No outstanding items.
+| Item | Depends on |
+|------|------------|
+| Agent detail view | daimon agent data |
+| MCP tool registration | daimon tool registry |
+| agnoshi intents | agnoshi NL engine |
+| LLM-assisted triage | hoosh LLM integration |
+| Process recommendations | hoosh + agent correlation |
+| Alert notifications | aethersafha |
+| Dashboard layouts | UX design |

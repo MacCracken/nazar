@@ -1,5 +1,7 @@
 //! Nazar HTTP API handlers (axum).
 
+use std::fmt::Write;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
@@ -21,6 +23,8 @@ pub fn router(state: SharedState) -> axum::Router {
         .route("/v1/alerts", get(api_alerts))
         .route("/v1/predict", get(api_predict))
         .route("/v1/processes", get(api_processes))
+        .route("/v1/correlations", get(api_correlations))
+        .route("/metrics", get(api_prometheus))
         .layer(cors)
         .with_state(state)
 }
@@ -80,4 +84,126 @@ async fn api_processes(State(state): State<SharedState>) -> impl IntoResponse {
             Json(serde_json::json!({"error": "No snapshot available yet"})),
         ),
     }
+}
+
+async fn api_correlations(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = read_state(&state);
+    Json(serde_json::json!({
+        "count": s.correlations.len(),
+        "correlations": s.correlations,
+    }))
+}
+
+async fn api_prometheus(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = read_state(&state);
+    let Some(snap) = &s.latest else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(axum::http::header::CONTENT_TYPE, "text/plain")],
+            String::new(),
+        );
+    };
+
+    let mut out = String::with_capacity(4096);
+
+    // CPU
+    let _ = writeln!(out, "# HELP nazar_cpu_usage_percent Current CPU usage percentage");
+    let _ = writeln!(out, "# TYPE nazar_cpu_usage_percent gauge");
+    let _ = writeln!(out, "nazar_cpu_usage_percent {:.2}", snap.cpu.total_percent);
+
+    let _ = writeln!(out, "# HELP nazar_load_average Load average");
+    let _ = writeln!(out, "# TYPE nazar_load_average gauge");
+    let _ = writeln!(out, "nazar_load_average{{period=\"1m\"}} {:.2}", snap.cpu.load_average[0]);
+    let _ = writeln!(out, "nazar_load_average{{period=\"5m\"}} {:.2}", snap.cpu.load_average[1]);
+    let _ = writeln!(out, "nazar_load_average{{period=\"15m\"}} {:.2}", snap.cpu.load_average[2]);
+
+    // Memory
+    let _ = writeln!(out, "# HELP nazar_memory_used_bytes Memory used in bytes");
+    let _ = writeln!(out, "# TYPE nazar_memory_used_bytes gauge");
+    let _ = writeln!(out, "nazar_memory_used_bytes {}", snap.memory.used_bytes);
+
+    let _ = writeln!(out, "# HELP nazar_memory_total_bytes Total memory in bytes");
+    let _ = writeln!(out, "# TYPE nazar_memory_total_bytes gauge");
+    let _ = writeln!(out, "nazar_memory_total_bytes {}", snap.memory.total_bytes);
+
+    let _ = writeln!(out, "# HELP nazar_swap_used_bytes Swap used in bytes");
+    let _ = writeln!(out, "# TYPE nazar_swap_used_bytes gauge");
+    let _ = writeln!(out, "nazar_swap_used_bytes {}", snap.memory.swap_used_bytes);
+
+    // Disk
+    let _ = writeln!(out, "# HELP nazar_disk_used_bytes Disk space used in bytes");
+    let _ = writeln!(out, "# TYPE nazar_disk_used_bytes gauge");
+    for d in &snap.disk {
+        let _ = writeln!(out, "nazar_disk_used_bytes{{mount=\"{}\",device=\"{}\"}} {}", d.mount_point, d.device, d.used_bytes);
+    }
+
+    let _ = writeln!(out, "# HELP nazar_disk_total_bytes Total disk space in bytes");
+    let _ = writeln!(out, "# TYPE nazar_disk_total_bytes gauge");
+    for d in &snap.disk {
+        let _ = writeln!(out, "nazar_disk_total_bytes{{mount=\"{}\",device=\"{}\"}} {}", d.mount_point, d.device, d.total_bytes);
+    }
+
+    let _ = writeln!(out, "# HELP nazar_disk_read_bytes Disk read bytes (delta)");
+    let _ = writeln!(out, "# TYPE nazar_disk_read_bytes gauge");
+    for d in &snap.disk {
+        let _ = writeln!(out, "nazar_disk_read_bytes{{mount=\"{}\"}} {}", d.mount_point, d.read_bytes);
+    }
+
+    let _ = writeln!(out, "# HELP nazar_disk_write_bytes Disk write bytes (delta)");
+    let _ = writeln!(out, "# TYPE nazar_disk_write_bytes gauge");
+    for d in &snap.disk {
+        let _ = writeln!(out, "nazar_disk_write_bytes{{mount=\"{}\"}} {}", d.mount_point, d.write_bytes);
+    }
+
+    // Network
+    let _ = writeln!(out, "# HELP nazar_network_rx_bytes Network bytes received (delta)");
+    let _ = writeln!(out, "# TYPE nazar_network_rx_bytes gauge");
+    let _ = writeln!(out, "nazar_network_rx_bytes {}", snap.network.total_rx_bytes);
+
+    let _ = writeln!(out, "# HELP nazar_network_tx_bytes Network bytes transmitted (delta)");
+    let _ = writeln!(out, "# TYPE nazar_network_tx_bytes gauge");
+    let _ = writeln!(out, "nazar_network_tx_bytes {}", snap.network.total_tx_bytes);
+
+    let _ = writeln!(out, "# HELP nazar_network_connections Active TCP connections");
+    let _ = writeln!(out, "# TYPE nazar_network_connections gauge");
+    let _ = writeln!(out, "nazar_network_connections {}", snap.network.active_connections);
+
+    // GPU
+    for g in &snap.gpu {
+        let _ = writeln!(out, "# HELP nazar_gpu_utilization_percent GPU utilization percentage");
+        let _ = writeln!(out, "# TYPE nazar_gpu_utilization_percent gauge");
+        let _ = writeln!(out, "nazar_gpu_utilization_percent{{id=\"{}\"}} {:.1}", g.id, g.utilization_percent);
+
+        let _ = writeln!(out, "# HELP nazar_gpu_vram_used_bytes GPU VRAM used in bytes");
+        let _ = writeln!(out, "# TYPE nazar_gpu_vram_used_bytes gauge");
+        let _ = writeln!(out, "nazar_gpu_vram_used_bytes{{id=\"{}\"}} {}", g.id, g.vram_used_bytes);
+
+        let _ = writeln!(out, "# HELP nazar_gpu_vram_total_bytes GPU VRAM total in bytes");
+        let _ = writeln!(out, "# TYPE nazar_gpu_vram_total_bytes gauge");
+        let _ = writeln!(out, "nazar_gpu_vram_total_bytes{{id=\"{}\"}} {}", g.id, g.vram_total_bytes);
+
+        if let Some(temp) = g.temp_celsius {
+            let _ = writeln!(out, "# HELP nazar_gpu_temperature_celsius GPU temperature");
+            let _ = writeln!(out, "# TYPE nazar_gpu_temperature_celsius gauge");
+            let _ = writeln!(out, "nazar_gpu_temperature_celsius{{id=\"{}\"}} {:.1}", g.id, temp);
+        }
+    }
+
+    // Temperatures
+    let _ = writeln!(out, "# HELP nazar_temperature_celsius Sensor temperature in celsius");
+    let _ = writeln!(out, "# TYPE nazar_temperature_celsius gauge");
+    for t in &snap.temperatures {
+        let _ = writeln!(out, "nazar_temperature_celsius{{label=\"{}\"}} {:.1}", t.label, t.temp_celsius);
+    }
+
+    // Alerts count
+    let _ = writeln!(out, "# HELP nazar_alerts_total Total active alerts");
+    let _ = writeln!(out, "# TYPE nazar_alerts_total gauge");
+    let _ = writeln!(out, "nazar_alerts_total {}", s.alerts.len());
+
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        out,
+    )
 }

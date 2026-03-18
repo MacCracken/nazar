@@ -2,6 +2,8 @@
 //!
 //! 5 native tools with real backend handlers that read from shared MonitorState.
 
+pub mod transport;
+
 use nazar_core::*;
 use serde::{Deserialize, Serialize};
 

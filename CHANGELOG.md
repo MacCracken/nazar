@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Multi-metric capacity planning** — predicts exhaustion for CPU, memory, and all disk mounts
+  - Generalized `predict_metric()` with configurable target thresholds
+  - 95% confidence intervals via standard error of the regression slope
+  - `PredictionResult` gains `confidence_low` / `confidence_high` fields
+  - `predict_all()` replaces single-metric `predict_memory_exhaustion()`
+- **Correlation detection** — Pearson cross-metric correlation analysis
+  - `CorrelationDetector` tracks 4 metric pairs: cpu/disk_io, cpu/net_tx, memory/swap, memory/net_rx
+  - `CorrelationResult` struct with coefficient, strength (Strong/Moderate/Weak), sample count
+  - Computed every 12th tick (~1 min), stored in `MonitorState.correlations`
+  - `GET /v1/correlations` HTTP endpoint
+- **Prometheus export** — `GET /metrics` endpoint in Prometheus text exposition format
+  - CPU, memory, swap, per-disk usage/IO, network rx/tx, GPU utilization/VRAM/temp, temperatures, alerts count
+  - Labeled metrics for multi-instance resources (disks, GPUs, sensors)
+  - `Content-Type: text/plain; version=0.0.4`
+- **SQLite persistence** — `nazar-store` crate for long-term metric storage
+  - WAL mode, auto-prune rows older than 30 days on startup
+  - Stores snapshots, alerts, and predictions every ~1 min (12th tick)
+  - Loads 100 most recent snapshots on startup to prime detectors
+  - `--db-path` CLI flag, defaults to `~/.local/share/nazar/metrics.db`
+- **MCP stdio transport** — JSON-RPC 2.0 server over stdin/stdout
+  - `--mcp` CLI flag runs nazar as an MCP server
+  - Handles `initialize`, `tools/list`, `tools/call` methods
+  - All 5 nazar tools callable via MCP protocol
+  - Tracing goes to stderr, stdout reserved for JSON-RPC
 - **GPU monitoring** — AMD and NVIDIA GPU metrics
   - `GpuMetrics` struct: id, driver, name, utilization%, VRAM used/total, temp, power, clock
   - **AMD amdgpu**: reads sysfs — `gpu_busy_percent`, `mem_info_vram_*`, hwmon temp/power/clock
@@ -60,7 +84,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Octal escape decoding** — `/proc/mounts` paths with `\040` (space), `\011` (tab) etc. are decoded correctly
 - **Agent data from daimon** — `ServiceChecker::fetch_agents()` queries daimon `/v1/agents` for real agent counts, CPU, and memory usage. Falls back to defaults when unreachable
 - **Config persistence** — `NazarConfig::load()`/`save()` to `~/.config/nazar/config.json`. Loaded on startup (CLI `--api-url` overrides). MCP config `set` auto-persists changes
-- **72 tests** across all crates (up from 27)
+- **87 tests** across 6 crates (up from 27)
   - Config validation: zero poll interval, low refresh rate, out-of-range thresholds, NaN, unknown keys, boolean validation
   - Service checker: host validation, known services, async probing, agent fetch fallback
   - Network delta computation, TimeSeries zero-max-points edge case
