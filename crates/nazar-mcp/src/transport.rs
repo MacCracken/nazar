@@ -1,5 +1,7 @@
 //! MCP stdio transport — JSON-RPC 2.0 over stdin/stdout.
 
+use std::io::Write;
+
 use nazar_core::SharedState;
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -24,7 +26,12 @@ pub async fn run_mcp_stdio(state: SharedState) {
             Ok(v) => v,
             Err(e) => {
                 let err = json_rpc_error(None, -32700, &format!("Parse error: {e}"));
-                println!("{}", serde_json::to_string(&err).unwrap_or_default());
+                let _ = writeln!(
+                    std::io::stdout(),
+                    "{}",
+                    serde_json::to_string(&err).unwrap_or_default()
+                );
+                let _ = std::io::stdout().flush();
                 continue;
             }
         };
@@ -32,8 +39,8 @@ pub async fn run_mcp_stdio(state: SharedState) {
         let method = request.get("method").and_then(|v| v.as_str()).unwrap_or("");
         let id = request.get("id").cloned();
 
-        // Notifications (no id) don't get a response
-        if method == "notifications/initialized" || method == "notifications/cancelled" {
+        // JSON-RPC 2.0: requests without an id are notifications — no response
+        if id.is_none() {
             continue;
         }
 
@@ -47,7 +54,12 @@ pub async fn run_mcp_stdio(state: SharedState) {
             _ => json_rpc_error(id, -32601, &format!("Method not found: {method}")),
         };
 
-        println!("{}", serde_json::to_string(&response).unwrap_or_default());
+        let _ = writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::to_string(&response).unwrap_or_default()
+        );
+        let _ = std::io::stdout().flush();
     }
 }
 
@@ -67,11 +79,13 @@ fn handle_initialize() -> serde_json::Value {
 fn handle_tools_list() -> serde_json::Value {
     let tools: Vec<serde_json::Value> = tool_definitions()
         .into_iter()
-        .map(|t| json!({
-            "name": t.name,
-            "description": t.description,
-            "inputSchema": t.input_schema,
-        }))
+        .map(|t| {
+            json!({
+                "name": t.name,
+                "description": t.description,
+                "inputSchema": t.input_schema,
+            })
+        })
         .collect();
     json!({ "tools": tools })
 }
@@ -90,7 +104,10 @@ fn handle_tools_call(params: &serde_json::Value, state: &SharedState) -> serde_j
     })
 }
 
-fn json_rpc_response(id: Option<serde_json::Value>, result: serde_json::Value) -> serde_json::Value {
+fn json_rpc_response(
+    id: Option<serde_json::Value>,
+    result: serde_json::Value,
+) -> serde_json::Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -138,10 +155,13 @@ mod tests {
     #[test]
     fn tools_call_config_get() {
         let state = new_shared_state(NazarConfig::default());
-        let resp = handle_tools_call(&json!({
-            "name": "nazar_config",
-            "arguments": {"action": "get"}
-        }), &state);
+        let resp = handle_tools_call(
+            &json!({
+                "name": "nazar_config",
+                "arguments": {"action": "get"}
+            }),
+            &state,
+        );
         assert!(!resp["isError"].as_bool().unwrap());
     }
 

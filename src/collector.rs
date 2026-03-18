@@ -9,14 +9,23 @@ use nazar_store::MetricStore;
 
 /// Run the metrics collection loop. Reads system metrics, checks for anomalies,
 /// probes AGNOS services, and writes everything to shared state.
-pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricStore>>>) {
+pub async fn collector_loop(
+    state: SharedState,
+    store: Option<Arc<Mutex<MetricStore>>>,
+    api_port: u16,
+) {
     let mut reader = ProcReader::new();
 
     let (mut detector, mut correlation_detector, poll_secs, api_url) = {
         let s = read_state(&state);
         let detector = AnomalyDetector::from_config(&s.config);
         let correlation_detector = CorrelationDetector::new();
-        (detector, correlation_detector, s.config.poll_interval_secs, s.config.api_url.clone())
+        (
+            detector,
+            correlation_detector,
+            s.config.poll_interval_secs,
+            s.config.api_url.clone(),
+        )
     };
 
     // Load historical snapshots into detectors if store available
@@ -47,20 +56,16 @@ pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricSt
     }
 
     // Register MCP tools with daimon on startup
-    let nazar_port = {
-        let s = read_state(&state);
-        s.config.api_url.clone() // we'll use the nazar port below
-    };
+    let callback_base = format!("http://127.0.0.1:{api_port}");
     if let Some(ref checker) = service_checker {
         let registrations = nazar_mcp::tool_registrations();
-        // Use localhost since nazar and daimon are on the same host
-        let callback_base = "http://127.0.0.1:8095".to_string();
-        let count = checker.register_mcp_tools(&registrations, &callback_base).await;
+        let count = checker
+            .register_mcp_tools(&registrations, &callback_base)
+            .await;
         if count > 0 {
             tracing::info!("Registered {count} MCP tools with daimon");
         }
     }
-    let _ = nazar_port; // used for callback_base derivation above
 
     let mut current_poll_secs = poll_secs;
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(current_poll_secs));
@@ -135,7 +140,8 @@ pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricSt
             }
 
             // LLM triage for new alerts (every 12th tick to avoid spamming hoosh)
-            if !alerts.is_empty() && tick_count.is_multiple_of(12)
+            if !alerts.is_empty()
+                && tick_count.is_multiple_of(12)
                 && let Some(first_alert) = alerts.first()
             {
                 triage_text = checker.triage_alert(first_alert).await;
@@ -143,17 +149,21 @@ pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricSt
 
             // Process recommendations periodically (every 60th tick = ~5 min)
             if tick_count.is_multiple_of(60) {
-                recommendations_text = checker.get_process_recommendations(
-                    &snapshot.top_processes,
-                    snapshot.memory.used_percent(),
-                    snapshot.cpu.total_percent,
-                ).await;
+                recommendations_text = checker
+                    .get_process_recommendations(
+                        &snapshot.top_processes,
+                        snapshot.memory.used_percent(),
+                        snapshot.cpu.total_percent,
+                    )
+                    .await;
             }
 
             // Re-register MCP tools if initial registration failed
             if !mcp_registered && tick_count.is_multiple_of(12) {
                 let registrations = nazar_mcp::tool_registrations();
-                let count = checker.register_mcp_tools(&registrations, "http://127.0.0.1:8095").await;
+                let count = checker
+                    .register_mcp_tools(&registrations, &callback_base)
+                    .await;
                 if count > 0 {
                     mcp_registered = true;
                     tracing::info!("Registered {count} MCP tools with daimon (retry)");
@@ -187,30 +197,44 @@ pub async fn collector_loop(state: SharedState, store: Option<Arc<Mutex<MetricSt
             s.cpu_history.push(snapshot.cpu.total_percent);
             s.mem_history.push(snapshot.memory.used_percent());
             let poll = s.config.poll_interval_secs.max(1) as f64;
-            s.net_rx_history.push(snapshot.network.total_rx_bytes as f64 / poll);
-            s.net_tx_history.push(snapshot.network.total_tx_bytes as f64 / poll);
+            s.net_rx_history
+                .push(snapshot.network.total_rx_bytes as f64 / poll);
+            s.net_tx_history
+                .push(snapshot.network.total_tx_bytes as f64 / poll);
 
             let max = s.config.max_history_points;
             for iface in &snapshot.network.interfaces {
                 if iface.name == "lo" {
                     continue;
                 }
-                let (rx_hist, tx_hist) = s.net_iface_history
+                let (rx_hist, tx_hist) = s
+                    .net_iface_history
                     .entry(iface.name.clone())
-                    .or_insert_with(|| (
-                        TimeSeries::new(format!("{} RX", iface.name), "B/s", max),
-                        TimeSeries::new(format!("{} TX", iface.name), "B/s", max),
-                    ));
+                    .or_insert_with(|| {
+                        (
+                            TimeSeries::new(format!("{} RX", iface.name), "B/s", max),
+                            TimeSeries::new(format!("{} TX", iface.name), "B/s", max),
+                        )
+                    });
                 rx_hist.push(iface.rx_bytes as f64 / poll);
                 tx_hist.push(iface.tx_bytes as f64 / poll);
             }
-            let current_ifaces: std::collections::HashSet<&str> =
-                snapshot.network.interfaces.iter().map(|i| i.name.as_str()).collect();
-            s.net_iface_history.retain(|k, _| current_ifaces.contains(k.as_str()));
+            let current_ifaces: std::collections::HashSet<&str> = snapshot
+                .network
+                .interfaces
+                .iter()
+                .map(|i| i.name.as_str())
+                .collect();
+            s.net_iface_history
+                .retain(|k, _| current_ifaces.contains(k.as_str()));
 
-            let current_mounts: std::collections::HashSet<&str> =
-                snapshot.disk.iter().map(|d| d.mount_point.as_str()).collect();
-            s.disk_history.retain(|k, _| current_mounts.contains(k.as_str()));
+            let current_mounts: std::collections::HashSet<&str> = snapshot
+                .disk
+                .iter()
+                .map(|d| d.mount_point.as_str())
+                .collect();
+            s.disk_history
+                .retain(|k, _| current_mounts.contains(k.as_str()));
             for disk in &snapshot.disk {
                 s.disk_history
                     .entry(disk.mount_point.clone())

@@ -63,17 +63,30 @@ impl AnomalyDetector {
         let mut alerts = Vec::new();
 
         if snapshot.cpu.total_percent > self.cpu_threshold {
-            self.maybe_alert(&mut alerts, now, AlertSeverity::Warning, "cpu", format!(
-                "CPU usage at {:.1}% (threshold: {:.1}%)",
-                snapshot.cpu.total_percent, self.cpu_threshold
-            ));
+            self.maybe_alert(
+                &mut alerts,
+                now,
+                AlertSeverity::Warning,
+                "cpu",
+                format!(
+                    "CPU usage at {:.1}% (threshold: {:.1}%)",
+                    snapshot.cpu.total_percent, self.cpu_threshold
+                ),
+            );
         }
 
         if snapshot.memory.used_percent() > self.memory_threshold {
-            self.maybe_alert(&mut alerts, now, AlertSeverity::Warning, "memory", format!(
-                "Memory usage at {:.1}% (threshold: {:.1}%)",
-                snapshot.memory.used_percent(), self.memory_threshold
-            ));
+            self.maybe_alert(
+                &mut alerts,
+                now,
+                AlertSeverity::Warning,
+                "memory",
+                format!(
+                    "Memory usage at {:.1}% (threshold: {:.1}%)",
+                    snapshot.memory.used_percent(),
+                    self.memory_threshold
+                ),
+            );
         }
 
         for disk in &snapshot.disk {
@@ -81,9 +94,17 @@ impl AnomalyDetector {
                 let component = format!("disk:{}", disk.mount_point);
                 let message = format!(
                     "Disk {} at {:.1}% (threshold: {:.1}%)",
-                    disk.mount_point, disk.used_percent(), self.disk_threshold
+                    disk.mount_point,
+                    disk.used_percent(),
+                    self.disk_threshold
                 );
-                self.maybe_alert(&mut alerts, now, AlertSeverity::Critical, &component, message);
+                self.maybe_alert(
+                    &mut alerts,
+                    now,
+                    AlertSeverity::Critical,
+                    &component,
+                    message,
+                );
             }
         }
 
@@ -134,14 +155,13 @@ impl AnomalyDetector {
         if let Some(last) = self.history.back() {
             for disk in &last.disk {
                 let mount = disk.mount_point.clone();
-                if let Some(p) = self.predict_metric(
-                    &format!("disk:{mount}"),
-                    95.0,
-                    |s| s.disk.iter()
+                if let Some(p) = self.predict_metric(&format!("disk:{mount}"), 95.0, |s| {
+                    s.disk
+                        .iter()
                         .find(|d| d.mount_point == mount)
                         .map(|d| d.used_percent())
-                        .unwrap_or(0.0),
-                ) {
+                        .unwrap_or(0.0)
+                }) {
                     results.push(p);
                 }
             }
@@ -157,7 +177,9 @@ impl AnomalyDetector {
         target: f64,
         extractor: impl Fn(&SystemSnapshot) -> f64,
     ) -> Option<PredictionResult> {
-        let points: Vec<(f64, f64)> = self.history.iter()
+        let points: Vec<(f64, f64)> = self
+            .history
+            .iter()
             .enumerate()
             .map(|(i, s)| (i as f64, extractor(s)))
             .collect();
@@ -203,7 +225,11 @@ impl AnomalyDetector {
             current_value,
             predicted_value: target,
             intervals_until: intervals,
-            trend: if slope > 0.5 { Trend::Rising } else { Trend::Stable },
+            trend: if slope > 0.5 {
+                Trend::Rising
+            } else {
+                Trend::Stable
+            },
             confidence_low: conf_low,
             confidence_high: conf_high,
         })
@@ -211,7 +237,9 @@ impl AnomalyDetector {
 
     /// Legacy method — delegates to predict_all.
     pub fn predict_memory_exhaustion(&self) -> Option<PredictionResult> {
-        self.predict_all().into_iter().find(|p| p.metric == "memory")
+        self.predict_all()
+            .into_iter()
+            .find(|p| p.metric == "memory")
     }
 }
 
@@ -253,7 +281,14 @@ impl CorrelationDetector {
             ("swap", snapshot.memory.swap_used_percent()),
             ("network_rx", snapshot.network.total_rx_bytes as f64),
             ("network_tx", snapshot.network.total_tx_bytes as f64),
-            ("disk_io", snapshot.disk.iter().map(|d| (d.read_bytes + d.write_bytes) as f64).sum()),
+            (
+                "disk_io",
+                snapshot
+                    .disk
+                    .iter()
+                    .map(|d| (d.read_bytes + d.write_bytes) as f64)
+                    .sum(),
+            ),
         ];
 
         for &(name, value) in metrics {
@@ -269,8 +304,12 @@ impl CorrelationDetector {
         let mut results = Vec::new();
 
         for &(a, b) in &self.pairs {
-            let Some(buf_a) = self.buffers.get(a) else { continue };
-            let Some(buf_b) = self.buffers.get(b) else { continue };
+            let Some(buf_a) = self.buffers.get(a) else {
+                continue;
+            };
+            let Some(buf_b) = self.buffers.get(b) else {
+                continue;
+            };
 
             let n = buf_a.len().min(buf_b.len());
             if n < 10 {
@@ -341,11 +380,19 @@ pub fn linear_regression_with_se(points: &[(f64, f64)]) -> Option<(f64, f64, f64
     // Standard error of the slope
     let x_mean = sum_x / n;
     let ss_xx: f64 = points.iter().map(|p| (p.0 - x_mean).powi(2)).sum();
-    let residuals_sq: f64 = points.iter()
-        .map(|p| { let pred = slope * p.0 + intercept; (p.1 - pred).powi(2) })
+    let residuals_sq: f64 = points
+        .iter()
+        .map(|p| {
+            let pred = slope * p.0 + intercept;
+            (p.1 - pred).powi(2)
+        })
         .sum();
     let se_residuals = (residuals_sq / (n - 2.0)).max(0.0).sqrt();
-    let se_slope = if ss_xx > 0.0 { se_residuals / ss_xx.sqrt() } else { 0.0 };
+    let se_slope = if ss_xx > 0.0 {
+        se_residuals / ss_xx.sqrt()
+    } else {
+        0.0
+    };
 
     Some((slope, intercept, se_slope))
 }
@@ -558,7 +605,9 @@ mod tests {
         }
         let corrs = detector.compute();
         // cpu and disk_io should be correlated
-        let cpu_disk = corrs.iter().find(|c| c.metric_a == "cpu" && c.metric_b == "disk_io");
+        let cpu_disk = corrs
+            .iter()
+            .find(|c| c.metric_a == "cpu" && c.metric_b == "disk_io");
         assert!(cpu_disk.is_some());
         assert!(cpu_disk.unwrap().coefficient > 0.9);
     }

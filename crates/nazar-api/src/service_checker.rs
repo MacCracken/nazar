@@ -4,10 +4,7 @@ use nazar_core::{AgentSummary, Alert, ServiceState, ServiceStatus};
 use serde_json::json;
 
 /// Known AGNOS services and their default ports.
-const KNOWN_SERVICES: &[(&str, u16)] = &[
-    ("daimon", 8090),
-    ("hoosh", 8088),
-];
+const KNOWN_SERVICES: &[(&str, u16)] = &[("daimon", 8090), ("hoosh", 8088)];
 
 /// Reusable AGNOS service integration with a shared HTTP client.
 pub struct ServiceChecker {
@@ -19,11 +16,7 @@ impl ServiceChecker {
     /// Create a new checker for the given host.
     pub fn new(host: &str) -> Option<Self> {
         let host = host.trim();
-        if host.is_empty()
-            || host.contains('/')
-            || host.contains(' ')
-            || host.contains(':')
-        {
+        if host.is_empty() || host.contains('/') || host.contains(' ') || host.contains(':') {
             return None;
         }
 
@@ -164,7 +157,11 @@ impl ServiceChecker {
                     tracing::info!("Registered MCP tool: {}", tool.name);
                 }
                 Ok(resp) => {
-                    tracing::debug!("Failed to register tool {}: HTTP {}", tool.name, resp.status());
+                    tracing::debug!(
+                        "Failed to register tool {}: HTTP {}",
+                        tool.name,
+                        resp.status()
+                    );
                 }
                 Err(e) => {
                     tracing::debug!("Failed to register tool {}: {e}", tool.name);
@@ -198,7 +195,9 @@ impl ServiceChecker {
             "temperature": 0.3,
         });
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("X-Source-Service", "nazar")
             .json(&body)
             .send()
@@ -227,9 +226,20 @@ impl ServiceChecker {
     ) -> Option<String> {
         let url = format!("http://{}:8088/v1/chat/completions", self.host);
 
-        let proc_summary: String = processes.iter().take(5).map(|p| {
-            format!("  {} (PID {}): CPU {:.1}%, Mem {:.1} MB", p.name, p.pid, p.cpu_percent, p.memory_bytes as f64 / 1e6)
-        }).collect::<Vec<_>>().join("\n");
+        let proc_summary: String = processes
+            .iter()
+            .take(5)
+            .map(|p| {
+                format!(
+                    "  {} (PID {}): CPU {:.1}%, Mem {:.1} MB",
+                    p.name,
+                    p.pid,
+                    p.cpu_percent,
+                    p.memory_bytes as f64 / 1e6
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
 
         let prompt = format!(
             "You are a system monitoring assistant. Analyze these top processes and provide \
@@ -245,7 +255,9 @@ impl ServiceChecker {
             "temperature": 0.3,
         });
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("X-Source-Service", "nazar")
             .json(&body)
             .send()
@@ -359,7 +371,9 @@ mod tests {
             description: "test tool".to_string(),
             input_schema: serde_json::json!({}),
         }];
-        let count = checker.register_mcp_tools(&tools, "http://127.0.0.1:8095").await;
+        let count = checker
+            .register_mcp_tools(&tools, "http://127.0.0.1:8095")
+            .await;
         assert_eq!(count, 0);
     }
 }

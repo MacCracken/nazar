@@ -10,4 +10,3 @@ nazar-core = { path = "../nazar-core" }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
-tracing = { workspace = true }

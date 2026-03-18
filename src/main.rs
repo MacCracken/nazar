@@ -40,8 +40,7 @@ fn main() {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -91,20 +90,15 @@ fn main() {
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
-    // Load historical snapshots into detector
-    if let Some(ref store) = store {
-        let s = store.lock().unwrap();
-        if let Ok(snaps) = s.load_recent_snapshots(100)
-            && !snaps.is_empty()
-        {
-            tracing::info!("Loaded {} historical snapshots", snaps.len());
-        }
-    }
-
-    // Start the metrics collector
+    // Start the metrics collector (loads historical snapshots internally)
     let collector_state = Arc::clone(&state);
     let collector_store = store.clone();
-    let collector_handle = rt.spawn(collector::collector_loop(collector_state, collector_store));
+    let collector_port = cli.port;
+    let collector_handle = rt.spawn(collector::collector_loop(
+        collector_state,
+        collector_store,
+        collector_port,
+    ));
 
     if cli.mcp {
         tracing::info!("Running in MCP mode (stdio)");

@@ -24,7 +24,10 @@ pub struct ToolResult {
 
 impl ToolResult {
     fn ok(value: serde_json::Value) -> Self {
-        Self { content: value, is_error: false }
+        Self {
+            content: value,
+            is_error: false,
+        }
     }
 
     fn err(message: &str) -> Self {
@@ -52,7 +55,8 @@ pub fn tool_definitions() -> Vec<ToolDescription> {
     vec![
         ToolDescription {
             name: "nazar_dashboard".to_string(),
-            description: "Get a system monitoring dashboard snapshot (CPU, memory, disk, agents)".to_string(),
+            description: "Get a system monitoring dashboard snapshot (CPU, memory, disk, agents)"
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -110,11 +114,7 @@ pub fn tool_definitions() -> Vec<ToolDescription> {
 }
 
 /// Execute an MCP tool by name against shared state.
-pub fn execute_tool(
-    name: &str,
-    params: &serde_json::Value,
-    state: &SharedState,
-) -> ToolResult {
+pub fn execute_tool(name: &str, params: &serde_json::Value, state: &SharedState) -> ToolResult {
     match name {
         "nazar_dashboard" => handle_dashboard(state),
         "nazar_alerts" => handle_alerts(params, state),
@@ -261,10 +261,7 @@ fn handle_history(params: &serde_json::Value, state: &SharedState) -> ToolResult
         Some(m) => m,
         None => return ToolResult::err("'metric' parameter is required"),
     };
-    let n = params
-        .get("points")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(60) as usize;
+    let n = params.get("points").and_then(|v| v.as_u64()).unwrap_or(60) as usize;
 
     let series = match metric {
         "cpu" => Some(&s.cpu_history),
@@ -301,25 +298,25 @@ fn handle_history(params: &serde_json::Value, state: &SharedState) -> ToolResult
             if let Some(mount) = metric.strip_prefix("disk:")
                 && let Some(ts) = s.disk_history.get(mount)
             {
-                    let points: Vec<_> = ts
-                        .points
-                        .iter()
-                        .rev()
-                        .take(n)
-                        .rev()
-                        .map(|p| {
-                            serde_json::json!({
-                                "timestamp": p.timestamp.to_rfc3339(),
-                                "value": p.value,
-                            })
+                let points: Vec<_> = ts
+                    .points
+                    .iter()
+                    .rev()
+                    .take(n)
+                    .rev()
+                    .map(|p| {
+                        serde_json::json!({
+                            "timestamp": p.timestamp.to_rfc3339(),
+                            "value": p.value,
                         })
-                        .collect();
-                    return ToolResult::ok(serde_json::json!({
-                        "metric": metric,
-                        "unit": ts.unit,
-                        "count": points.len(),
-                        "points": points,
-                    }));
+                    })
+                    .collect();
+                return ToolResult::ok(serde_json::json!({
+                    "metric": metric,
+                    "unit": ts.unit,
+                    "count": points.len(),
+                    "points": points,
+                }));
             }
             ToolResult::err(&format!(
                 "Unknown metric '{metric}'. Available: cpu, memory, network_rx, network_tx, disk:<mount>"
@@ -357,51 +354,55 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
                 (Some(k), Some(v)) => {
                     let mut s = write_state(state);
                     match k {
-                        "poll_interval_secs" => {
-                            match v.parse::<u64>() {
-                                Ok(n) if n >= 1 => s.config.poll_interval_secs = n,
-                                Ok(_) => return ToolResult::err("poll_interval_secs must be >= 1"),
-                                Err(_) => return ToolResult::err("Invalid value for poll_interval_secs"),
+                        "poll_interval_secs" => match v.parse::<u64>() {
+                            Ok(n) if n >= 1 => s.config.poll_interval_secs = n,
+                            Ok(_) => return ToolResult::err("poll_interval_secs must be >= 1"),
+                            Err(_) => {
+                                return ToolResult::err("Invalid value for poll_interval_secs");
                             }
-                        }
+                        },
                         "show_anomalies" => match v {
                             "true" => s.config.show_anomalies = true,
                             "false" => s.config.show_anomalies = false,
-                            _ => return ToolResult::err("show_anomalies must be 'true' or 'false'"),
+                            _ => {
+                                return ToolResult::err("show_anomalies must be 'true' or 'false'");
+                            }
                         },
                         "show_agents" => match v {
                             "true" => s.config.show_agents = true,
                             "false" => s.config.show_agents = false,
                             _ => return ToolResult::err("show_agents must be 'true' or 'false'"),
                         },
-                        "ui_refresh_ms" => {
-                            match v.parse::<u64>() {
-                                Ok(n) if n >= 100 => s.config.ui_refresh_ms = n,
-                                Ok(_) => return ToolResult::err("ui_refresh_ms must be >= 100"),
-                                Err(_) => return ToolResult::err("Invalid value for ui_refresh_ms"),
-                            }
-                        }
+                        "ui_refresh_ms" => match v.parse::<u64>() {
+                            Ok(n) if n >= 100 => s.config.ui_refresh_ms = n,
+                            Ok(_) => return ToolResult::err("ui_refresh_ms must be >= 100"),
+                            Err(_) => return ToolResult::err("Invalid value for ui_refresh_ms"),
+                        },
                         "cpu_threshold" | "memory_threshold" | "disk_threshold" => {
                             match v.parse::<f64>() {
-                                Ok(n) if n.is_finite() && (0.0..=100.0).contains(&n) => {
-                                    match k {
-                                        "cpu_threshold" => s.config.cpu_threshold = n,
-                                        "memory_threshold" => s.config.memory_threshold = n,
-                                        "disk_threshold" => s.config.disk_threshold = n,
-                                        _ => unreachable!(),
-                                    }
+                                Ok(n) if n.is_finite() && (0.0..=100.0).contains(&n) => match k {
+                                    "cpu_threshold" => s.config.cpu_threshold = n,
+                                    "memory_threshold" => s.config.memory_threshold = n,
+                                    "disk_threshold" => s.config.disk_threshold = n,
+                                    _ => unreachable!(),
+                                },
+                                Ok(_) => {
+                                    return ToolResult::err(&format!(
+                                        "{k} must be a finite number between 0.0 and 100.0"
+                                    ));
                                 }
-                                Ok(_) => return ToolResult::err(&format!("{k} must be a finite number between 0.0 and 100.0")),
-                                Err(_) => return ToolResult::err(&format!("Invalid value for {k}")),
+                                Err(_) => {
+                                    return ToolResult::err(&format!("Invalid value for {k}"));
+                                }
                             }
                         }
-                        "top_processes" => {
-                            match v.parse::<usize>() {
-                                Ok(n) if (1..=50).contains(&n) => s.config.top_processes = n,
-                                Ok(_) => return ToolResult::err("top_processes must be between 1 and 50"),
-                                Err(_) => return ToolResult::err("Invalid value for top_processes"),
+                        "top_processes" => match v.parse::<usize>() {
+                            Ok(n) if (1..=50).contains(&n) => s.config.top_processes = n,
+                            Ok(_) => {
+                                return ToolResult::err("top_processes must be between 1 and 50");
                             }
-                        }
+                            Err(_) => return ToolResult::err("Invalid value for top_processes"),
+                        },
                         _ => return ToolResult::err(&format!("Unknown config key: {k}")),
                     }
                     // Persist config to disk

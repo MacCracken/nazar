@@ -21,7 +21,14 @@ struct CpuTimes {
 
 impl CpuTimes {
     fn total(&self) -> u64 {
-        self.user + self.nice + self.system + self.idle + self.iowait + self.irq + self.softirq + self.steal
+        self.user
+            + self.nice
+            + self.system
+            + self.idle
+            + self.iowait
+            + self.irq
+            + self.softirq
+            + self.steal
     }
 
     fn busy(&self) -> u64 {
@@ -106,7 +113,11 @@ impl ProcReader {
             (0.0, vec![])
         };
 
-        self.num_cores = if current.len() > 1 { current.len() - 1 } else { 1 };
+        self.num_cores = if current.len() > 1 {
+            current.len() - 1
+        } else {
+            1
+        };
         self.prev_cpu_times = Some(current);
 
         CpuMetrics {
@@ -158,7 +169,9 @@ impl ProcReader {
         let current_io = Self::parse_diskstats();
 
         let mut disks = Vec::new();
-        let real_fs = ["ext4", "ext3", "ext2", "btrfs", "xfs", "f2fs", "zfs", "ntfs", "vfat", "fuseblk"];
+        let real_fs = [
+            "ext4", "ext3", "ext2", "btrfs", "xfs", "f2fs", "zfs", "ntfs", "vfat", "fuseblk",
+        ];
 
         let content = match std::fs::read_to_string("/proc/mounts") {
             Ok(c) => c,
@@ -187,19 +200,20 @@ impl ProcReader {
                 let dev_short = device.rsplit('/').next().unwrap_or(device);
 
                 // Compute I/O deltas
-                let (read_bytes, write_bytes) = if let Some((cur_r, cur_w)) = current_io.per_device.get(dev_short) {
-                    if let Some(ref prev) = self.prev_disk_io {
-                        if let Some((prev_r, prev_w)) = prev.per_device.get(dev_short) {
-                            (cur_r.saturating_sub(*prev_r), cur_w.saturating_sub(*prev_w))
+                let (read_bytes, write_bytes) =
+                    if let Some((cur_r, cur_w)) = current_io.per_device.get(dev_short) {
+                        if let Some(ref prev) = self.prev_disk_io {
+                            if let Some((prev_r, prev_w)) = prev.per_device.get(dev_short) {
+                                (cur_r.saturating_sub(*prev_r), cur_w.saturating_sub(*prev_w))
+                            } else {
+                                (0, 0)
+                            }
                         } else {
                             (0, 0)
                         }
                     } else {
                         (0, 0)
-                    }
-                } else {
-                    (0, 0)
-                };
+                    };
 
                 disks.push(DiskMetrics {
                     mount_point,
@@ -261,7 +275,9 @@ impl ProcReader {
                     .map(|s| s.trim().to_string())
                     .unwrap_or_default();
 
-                let Ok(files) = std::fs::read_dir(&hwmon_path) else { continue };
+                let Ok(files) = std::fs::read_dir(&hwmon_path) else {
+                    continue;
+                };
                 for file in files.flatten() {
                     let fname = file.file_name();
                     let fname_str = fname.to_string_lossy();
@@ -341,7 +357,10 @@ impl ProcReader {
                 // Compute deltas from previous reading
                 let (delta_rx, delta_tx) = if let Some(ref prev) = self.prev_net {
                     if let Some(&(prev_rx, prev_tx)) = prev.per_interface.get(name) {
-                        (cum_rx.saturating_sub(prev_rx), cum_tx.saturating_sub(prev_tx))
+                        (
+                            cum_rx.saturating_sub(prev_rx),
+                            cum_tx.saturating_sub(prev_tx),
+                        )
                     } else {
                         (0, 0)
                     }
@@ -349,7 +368,9 @@ impl ProcReader {
                     (0, 0)
                 };
 
-                current_counters.per_interface.insert(name.to_string(), (cum_rx, cum_tx));
+                current_counters
+                    .per_interface
+                    .insert(name.to_string(), (cum_rx, cum_tx));
 
                 if name != "lo" {
                     current_counters.total_rx += cum_rx;
@@ -420,29 +441,50 @@ impl ProcReader {
 
         for entry in proc_dir.flatten() {
             let name = entry.file_name();
-            let Some(pid_str) = name.to_str() else { continue };
-            let Ok(pid) = pid_str.parse::<u32>() else { continue };
+            let Some(pid_str) = name.to_str() else {
+                continue;
+            };
+            let Ok(pid) = pid_str.parse::<u32>() else {
+                continue;
+            };
 
             let stat_path = format!("/proc/{pid}/stat");
-            let Ok(content) = std::fs::read_to_string(&stat_path) else { continue };
+            let Ok(content) = std::fs::read_to_string(&stat_path) else {
+                continue;
+            };
 
             // Parse comm field: find first '(' and last ')' to handle names with parens
-            let Some(comm_start) = content.find('(') else { continue };
-            let Some(comm_end) = content.rfind(')') else { continue };
-            if comm_end <= comm_start { continue; }
+            let Some(comm_start) = content.find('(') else {
+                continue;
+            };
+            let Some(comm_end) = content.rfind(')') else {
+                continue;
+            };
+            if comm_end <= comm_start {
+                continue;
+            }
 
             let proc_name = content[comm_start + 1..comm_end].to_string();
             let rest = &content[comm_end + 2..]; // skip ") "
             let fields: Vec<&str> = rest.split_whitespace().collect();
             // fields[0] = state, fields[11] = utime, fields[12] = stime, fields[17] = num_threads
-            if fields.len() < 18 { continue; }
+            if fields.len() < 18 {
+                continue;
+            }
 
             let state = fields[0].chars().next().unwrap_or('?');
             let utime = fields[11].parse::<u64>().unwrap_or(0);
             let stime = fields[12].parse::<u64>().unwrap_or(0);
             let num_threads = fields[17].parse::<u64>().unwrap_or(0);
 
-            current_procs.push(RawProc { pid, name: proc_name, state, utime, stime, num_threads });
+            current_procs.push(RawProc {
+                pid,
+                name: proc_name,
+                state,
+                utime,
+                stime,
+                num_threads,
+            });
         }
 
         // Sum total threads across all processes
@@ -454,7 +496,10 @@ impl ProcReader {
         let mut procs_with_cpu: Vec<ProcessInfo> = current_procs
             .into_iter()
             .map(|raw| {
-                let current_times = ProcCpuTimes { utime: raw.utime, stime: raw.stime };
+                let current_times = ProcCpuTimes {
+                    utime: raw.utime,
+                    stime: raw.stime,
+                };
                 let cpu_percent = if sys_delta > 0.0 {
                     if let Some(prev) = self.prev_proc_times.get(&raw.pid) {
                         let proc_delta = current_times.total().saturating_sub(prev.total());
@@ -483,7 +528,11 @@ impl ProcReader {
         self.prev_proc_times = new_prev;
 
         // Sort by CPU descending, take top-N
-        procs_with_cpu.sort_by(|a, b| b.cpu_percent.partial_cmp(&a.cpu_percent).unwrap_or(std::cmp::Ordering::Equal));
+        procs_with_cpu.sort_by(|a, b| {
+            b.cpu_percent
+                .partial_cmp(&a.cpu_percent)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         procs_with_cpu.truncate(top_n);
 
         // Read memory only for top-N (read /proc/[pid]/statm)
@@ -495,7 +544,8 @@ impl ProcReader {
             {
                 proc.memory_bytes = rss_pages * self.page_size;
                 if total_mem_bytes > 0 {
-                    proc.memory_percent = (proc.memory_bytes as f64 / total_mem_bytes as f64) * 100.0;
+                    proc.memory_percent =
+                        (proc.memory_bytes as f64 / total_mem_bytes as f64) * 100.0;
                 }
             }
         }
@@ -644,7 +694,12 @@ impl ProcReader {
     ///
     /// `agents` and `services` are passed in (they come from the daimon API,
     /// not from /proc).
-    pub fn snapshot(&mut self, agents: AgentSummary, services: Vec<ServiceStatus>, top_n: usize) -> SystemSnapshot {
+    pub fn snapshot(
+        &mut self,
+        agents: AgentSummary,
+        services: Vec<ServiceStatus>,
+        top_n: usize,
+    ) -> SystemSnapshot {
         let mut cpu = self.read_cpu();
         let memory = self.read_memory();
         let top_processes = self.read_processes(top_n, memory.total_bytes);
@@ -688,7 +743,9 @@ impl ProcReader {
             let rd_sectors = fields[5].parse::<u64>().unwrap_or(0);
             let wr_sectors = fields[9].parse::<u64>().unwrap_or(0);
             // Sector size is 512 bytes in /proc/diskstats
-            counters.per_device.insert(name.to_string(), (rd_sectors * 512, wr_sectors * 512));
+            counters
+                .per_device
+                .insert(name.to_string(), (rd_sectors * 512, wr_sectors * 512));
         }
 
         counters
@@ -708,14 +765,19 @@ impl ProcReader {
             if line.starts_with("cpu") {
                 // Match "cpu " (aggregate) or "cpu0", "cpu1", etc.
                 let first_word = line.split_whitespace().next().unwrap_or("");
-                if first_word != "cpu" && !first_word.strip_prefix("cpu").is_some_and(|s| s.starts_with(|c: char| c.is_ascii_digit())) {
+                if first_word != "cpu"
+                    && !first_word
+                        .strip_prefix("cpu")
+                        .is_some_and(|s| s.starts_with(|c: char| c.is_ascii_digit()))
+                {
                     continue;
                 }
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() < 8 {
                     continue;
                 }
-                let parse = |i: usize| -> u64 { parts.get(i).and_then(|v| v.parse().ok()).unwrap_or(0) };
+                let parse =
+                    |i: usize| -> u64 { parts.get(i).and_then(|v| v.parse().ok()).unwrap_or(0) };
                 times.push(CpuTimes {
                     user: parse(1),
                     nice: parse(2),
@@ -776,7 +838,11 @@ impl ProcReader {
                 if i < prev.len() {
                     let dt = current[i].total().saturating_sub(prev[i].total());
                     let db = current[i].busy().saturating_sub(prev[i].busy());
-                    if dt == 0 { 0.0 } else { (db as f64 / dt as f64) * 100.0 }
+                    if dt == 0 {
+                        0.0
+                    } else {
+                        (db as f64 / dt as f64) * 100.0
+                    }
                 } else {
                     0.0
                 }
@@ -840,9 +906,7 @@ impl ProcReader {
                         .skip(1) // header
                         .filter(|line| {
                             // Column 4 (0-indexed 3) is the state; "01" = ESTABLISHED
-                            line.split_whitespace()
-                                .nth(3)
-                                .is_some_and(|st| st == "01")
+                            line.split_whitespace().nth(3).is_some_and(|st| st == "01")
                         })
                         .count() as u64
                 })
@@ -920,7 +984,10 @@ mod tests {
         let net = reader.read_network();
         // Should find at least lo on Linux
         if cfg!(target_os = "linux") {
-            assert!(!net.interfaces.is_empty(), "expected at least one interface");
+            assert!(
+                !net.interfaces.is_empty(),
+                "expected at least one interface"
+            );
             assert!(net.interfaces.iter().any(|i| i.name == "lo"));
         }
     }
@@ -1002,7 +1069,10 @@ mod tests {
     fn parse_diskstats_runs() {
         let counters = ProcReader::parse_diskstats();
         if cfg!(target_os = "linux") {
-            assert!(!counters.per_device.is_empty(), "expected at least one device");
+            assert!(
+                !counters.per_device.is_empty(),
+                "expected at least one device"
+            );
         }
     }
 
@@ -1056,7 +1126,10 @@ mod tests {
 
     #[test]
     fn decode_octal_escapes_space() {
-        assert_eq!(ProcReader::decode_octal_escapes("/mnt/my\\040drive"), "/mnt/my drive");
+        assert_eq!(
+            ProcReader::decode_octal_escapes("/mnt/my\\040drive"),
+            "/mnt/my drive"
+        );
     }
 
     #[test]
@@ -1100,12 +1173,48 @@ mod tests {
     #[test]
     fn compute_cpu_deltas_with_cores() {
         let prev = vec![
-            CpuTimes { user: 100, nice: 0, system: 50, idle: 850, iowait: 0, irq: 0, softirq: 0, steal: 0 },
-            CpuTimes { user: 50, nice: 0, system: 25, idle: 425, iowait: 0, irq: 0, softirq: 0, steal: 0 },
+            CpuTimes {
+                user: 100,
+                nice: 0,
+                system: 50,
+                idle: 850,
+                iowait: 0,
+                irq: 0,
+                softirq: 0,
+                steal: 0,
+            },
+            CpuTimes {
+                user: 50,
+                nice: 0,
+                system: 25,
+                idle: 425,
+                iowait: 0,
+                irq: 0,
+                softirq: 0,
+                steal: 0,
+            },
         ];
         let current = vec![
-            CpuTimes { user: 200, nice: 0, system: 100, idle: 900, iowait: 0, irq: 0, softirq: 0, steal: 0 },
-            CpuTimes { user: 100, nice: 0, system: 50, idle: 450, iowait: 0, irq: 0, softirq: 0, steal: 0 },
+            CpuTimes {
+                user: 200,
+                nice: 0,
+                system: 100,
+                idle: 900,
+                iowait: 0,
+                irq: 0,
+                softirq: 0,
+                steal: 0,
+            },
+            CpuTimes {
+                user: 100,
+                nice: 0,
+                system: 50,
+                idle: 450,
+                iowait: 0,
+                irq: 0,
+                softirq: 0,
+                steal: 0,
+            },
         ];
         let (total, cores) = ProcReader::compute_cpu_deltas(&prev, &current);
         assert!((total - 75.0).abs() < 0.01);

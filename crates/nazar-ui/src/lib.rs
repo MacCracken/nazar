@@ -27,7 +27,13 @@ impl NazarApp {
         Self { state }
     }
 
-    fn draw_header(&self, ui: &mut egui::Ui, api_url: &str, has_snapshot: bool, sample_count: usize) {
+    fn draw_header(
+        &self,
+        ui: &mut egui::Ui,
+        api_url: &str,
+        has_snapshot: bool,
+        sample_count: usize,
+    ) {
         ui.horizontal(|ui| {
             ui.heading("Nazar — System Monitor");
             ui.separator();
@@ -140,10 +146,7 @@ impl NazarApp {
                 mem.total_bytes as f64 / 1e9,
                 mem.used_percent()
             ));
-            ui.add(
-                egui::ProgressBar::new((mem.used_percent() / 100.0) as f32)
-                    .text("RAM"),
-            );
+            ui.add(egui::ProgressBar::new((mem.used_percent() / 100.0) as f32).text("RAM"));
             if mem.swap_total_bytes > 0 {
                 ui.label(format!(
                     "Swap: {:.1} GB / {:.1} GB ({:.1}%)",
@@ -183,9 +186,11 @@ impl NazarApp {
             } else {
                 for d in &snap.disk {
                     let io_str = if d.read_bytes > 0 || d.write_bytes > 0 {
-                        format!("  R: {:.0} KB  W: {:.0} KB",
+                        format!(
+                            "  R: {:.0} KB  W: {:.0} KB",
                             d.read_bytes as f64 / 1024.0,
-                            d.write_bytes as f64 / 1024.0)
+                            d.write_bytes as f64 / 1024.0
+                        )
                     } else {
                         String::new()
                     };
@@ -240,20 +245,26 @@ impl NazarApp {
                 if let Some((rx_data, tx_data)) = iface_history.get(&iface.name)
                     && rx_data.len() > 1
                 {
-                        let rx_points: egui_plot::PlotPoints = rx_data
-                            .iter().enumerate().map(|(i, v)| [i as f64, *v / 1024.0]).collect();
-                        let tx_points: egui_plot::PlotPoints = tx_data
-                            .iter().enumerate().map(|(i, v)| [i as f64, *v / 1024.0]).collect();
-                        egui_plot::Plot::new(format!("net_{}", iface.name))
-                            .height(50.0)
-                            .show_axes(false)
-                            .allow_drag(false)
-                            .allow_zoom(false)
-                            .allow_scroll(false)
-                            .show(ui, |plot_ui| {
-                                plot_ui.line(egui_plot::Line::new("RX KB/s", rx_points));
-                                plot_ui.line(egui_plot::Line::new("TX KB/s", tx_points));
-                            });
+                    let rx_points: egui_plot::PlotPoints = rx_data
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| [i as f64, *v / 1024.0])
+                        .collect();
+                    let tx_points: egui_plot::PlotPoints = tx_data
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| [i as f64, *v / 1024.0])
+                        .collect();
+                    egui_plot::Plot::new(format!("net_{}", iface.name))
+                        .height(50.0)
+                        .show_axes(false)
+                        .allow_drag(false)
+                        .allow_zoom(false)
+                        .allow_scroll(false)
+                        .show(ui, |plot_ui| {
+                            plot_ui.line(egui_plot::Line::new("RX KB/s", rx_points));
+                            plot_ui.line(egui_plot::Line::new("TX KB/s", tx_points));
+                        });
                 }
             }
         });
@@ -320,10 +331,10 @@ impl NazarApp {
                 } else {
                     egui::Color32::LIGHT_GRAY
                 };
-                ui.colored_label(color, format!(
-                    "{}: {:.1}°C{}",
-                    t.label, t.temp_celsius, crit_str
-                ));
+                ui.colored_label(
+                    color,
+                    format!("{}: {:.1}°C{}", t.label, t.temp_celsius, crit_str),
+                );
             }
         });
     }
@@ -343,10 +354,7 @@ impl NazarApp {
                     };
                     ui.horizontal(|ui| {
                         ui.colored_label(color, icon);
-                        ui.label(format!(
-                            "{} ({})",
-                            svc.name, svc.state
-                        ));
+                        ui.label(format!("{} ({})", svc.name, svc.state));
                         if let Some(port) = svc.port {
                             ui.label(format!("port {port}"));
                         }
@@ -384,7 +392,9 @@ impl NazarApp {
                         ui.end_row();
 
                         // Merge CPU and memory maps
-                        let mut agent_ids: Vec<&String> = agents.cpu_usage.keys()
+                        let mut agent_ids: Vec<&String> = agents
+                            .cpu_usage
+                            .keys()
                             .chain(agents.memory_usage.keys())
                             .collect::<std::collections::HashSet<_>>()
                             .into_iter()
@@ -470,18 +480,19 @@ impl NazarApp {
         });
     }
 
-    fn draw_predictions_panel(&self, ui: &mut egui::Ui, predictions: &[PredictionResult], poll_secs: u64) {
+    fn draw_predictions_panel(
+        &self,
+        ui: &mut egui::Ui,
+        predictions: &[PredictionResult],
+        poll_secs: u64,
+    ) {
         ui.group(|ui| {
             ui.heading("Predictions");
             for pred in predictions {
                 let mins = (pred.intervals_until * poll_secs) / 60;
                 ui.label(format!(
                     "{}: {:.1}% now → {:.1}% in ~{} min (trend: {:?})",
-                    pred.metric,
-                    pred.current_value,
-                    pred.predicted_value,
-                    mins,
-                    pred.trend,
+                    pred.metric, pred.current_value, pred.predicted_value, mins, pred.trend,
                 ));
             }
         });
@@ -527,7 +538,16 @@ impl eframe::App for NazarApp {
             }
 
             // Clone all needed data out of the lock to avoid holding it during rendering
-            let (snap, cpu_data, mem_data, iface_history, predictions, poll_secs, triage, recommendations) = {
+            let (
+                snap,
+                cpu_data,
+                mem_data,
+                iface_history,
+                predictions,
+                poll_secs,
+                triage,
+                recommendations,
+            ) = {
                 let s = read_state(&self.state);
                 let snap = s.latest.clone().unwrap();
                 let cpu_data = s.cpu_history.last_n(120);
@@ -541,7 +561,16 @@ impl eframe::App for NazarApp {
                 let poll_secs = s.config.poll_interval_secs;
                 let triage = s.last_triage.clone();
                 let recommendations = s.last_recommendations.clone();
-                (snap, cpu_data, mem_data, iface_history, predictions, poll_secs, triage, recommendations)
+                (
+                    snap,
+                    cpu_data,
+                    mem_data,
+                    iface_history,
+                    predictions,
+                    poll_secs,
+                    triage,
+                    recommendations,
+                )
             };
 
             egui::ScrollArea::vertical().show(ui, |ui| {

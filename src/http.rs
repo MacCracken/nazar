@@ -76,10 +76,13 @@ async fn api_predict(State(state): State<SharedState>) -> Json<serde_json::Value
 async fn api_processes(State(state): State<SharedState>) -> impl IntoResponse {
     let s = read_state(&state);
     match &s.latest {
-        Some(snap) => (StatusCode::OK, Json(serde_json::json!({
-            "count": snap.top_processes.len(),
-            "processes": snap.top_processes,
-        }))),
+        Some(snap) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "count": snap.top_processes.len(),
+                "processes": snap.top_processes,
+            })),
+        ),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({"error": "No snapshot available yet"})),
@@ -105,18 +108,40 @@ async fn api_prometheus(State(state): State<SharedState>) -> impl IntoResponse {
         );
     };
 
+    /// Escape a string for use as a Prometheus label value.
+    fn prom_escape(s: &str) -> String {
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+    }
+
     let mut out = String::with_capacity(4096);
 
     // CPU
-    let _ = writeln!(out, "# HELP nazar_cpu_usage_percent Current CPU usage percentage");
+    let _ = writeln!(
+        out,
+        "# HELP nazar_cpu_usage_percent Current CPU usage percentage"
+    );
     let _ = writeln!(out, "# TYPE nazar_cpu_usage_percent gauge");
     let _ = writeln!(out, "nazar_cpu_usage_percent {:.2}", snap.cpu.total_percent);
 
     let _ = writeln!(out, "# HELP nazar_load_average Load average");
     let _ = writeln!(out, "# TYPE nazar_load_average gauge");
-    let _ = writeln!(out, "nazar_load_average{{period=\"1m\"}} {:.2}", snap.cpu.load_average[0]);
-    let _ = writeln!(out, "nazar_load_average{{period=\"5m\"}} {:.2}", snap.cpu.load_average[1]);
-    let _ = writeln!(out, "nazar_load_average{{period=\"15m\"}} {:.2}", snap.cpu.load_average[2]);
+    let _ = writeln!(
+        out,
+        "nazar_load_average{{period=\"1m\"}} {:.2}",
+        snap.cpu.load_average[0]
+    );
+    let _ = writeln!(
+        out,
+        "nazar_load_average{{period=\"5m\"}} {:.2}",
+        snap.cpu.load_average[1]
+    );
+    let _ = writeln!(
+        out,
+        "nazar_load_average{{period=\"15m\"}} {:.2}",
+        snap.cpu.load_average[2]
+    );
 
     // Memory
     let _ = writeln!(out, "# HELP nazar_memory_used_bytes Memory used in bytes");
@@ -135,66 +160,148 @@ async fn api_prometheus(State(state): State<SharedState>) -> impl IntoResponse {
     let _ = writeln!(out, "# HELP nazar_disk_used_bytes Disk space used in bytes");
     let _ = writeln!(out, "# TYPE nazar_disk_used_bytes gauge");
     for d in &snap.disk {
-        let _ = writeln!(out, "nazar_disk_used_bytes{{mount=\"{}\",device=\"{}\"}} {}", d.mount_point, d.device, d.used_bytes);
+        let _ = writeln!(
+            out,
+            "nazar_disk_used_bytes{{mount=\"{}\",device=\"{}\"}} {}",
+            prom_escape(&d.mount_point),
+            prom_escape(&d.device),
+            d.used_bytes
+        );
     }
 
-    let _ = writeln!(out, "# HELP nazar_disk_total_bytes Total disk space in bytes");
+    let _ = writeln!(
+        out,
+        "# HELP nazar_disk_total_bytes Total disk space in bytes"
+    );
     let _ = writeln!(out, "# TYPE nazar_disk_total_bytes gauge");
     for d in &snap.disk {
-        let _ = writeln!(out, "nazar_disk_total_bytes{{mount=\"{}\",device=\"{}\"}} {}", d.mount_point, d.device, d.total_bytes);
+        let _ = writeln!(
+            out,
+            "nazar_disk_total_bytes{{mount=\"{}\",device=\"{}\"}} {}",
+            prom_escape(&d.mount_point),
+            prom_escape(&d.device),
+            d.total_bytes
+        );
     }
 
     let _ = writeln!(out, "# HELP nazar_disk_read_bytes Disk read bytes (delta)");
     let _ = writeln!(out, "# TYPE nazar_disk_read_bytes gauge");
     for d in &snap.disk {
-        let _ = writeln!(out, "nazar_disk_read_bytes{{mount=\"{}\"}} {}", d.mount_point, d.read_bytes);
+        let _ = writeln!(
+            out,
+            "nazar_disk_read_bytes{{mount=\"{}\"}} {}",
+            prom_escape(&d.mount_point),
+            d.read_bytes
+        );
     }
 
-    let _ = writeln!(out, "# HELP nazar_disk_write_bytes Disk write bytes (delta)");
+    let _ = writeln!(
+        out,
+        "# HELP nazar_disk_write_bytes Disk write bytes (delta)"
+    );
     let _ = writeln!(out, "# TYPE nazar_disk_write_bytes gauge");
     for d in &snap.disk {
-        let _ = writeln!(out, "nazar_disk_write_bytes{{mount=\"{}\"}} {}", d.mount_point, d.write_bytes);
+        let _ = writeln!(
+            out,
+            "nazar_disk_write_bytes{{mount=\"{}\"}} {}",
+            prom_escape(&d.mount_point),
+            d.write_bytes
+        );
     }
 
     // Network
-    let _ = writeln!(out, "# HELP nazar_network_rx_bytes Network bytes received (delta)");
+    let _ = writeln!(
+        out,
+        "# HELP nazar_network_rx_bytes Network bytes received (delta)"
+    );
     let _ = writeln!(out, "# TYPE nazar_network_rx_bytes gauge");
-    let _ = writeln!(out, "nazar_network_rx_bytes {}", snap.network.total_rx_bytes);
+    let _ = writeln!(
+        out,
+        "nazar_network_rx_bytes {}",
+        snap.network.total_rx_bytes
+    );
 
-    let _ = writeln!(out, "# HELP nazar_network_tx_bytes Network bytes transmitted (delta)");
+    let _ = writeln!(
+        out,
+        "# HELP nazar_network_tx_bytes Network bytes transmitted (delta)"
+    );
     let _ = writeln!(out, "# TYPE nazar_network_tx_bytes gauge");
-    let _ = writeln!(out, "nazar_network_tx_bytes {}", snap.network.total_tx_bytes);
+    let _ = writeln!(
+        out,
+        "nazar_network_tx_bytes {}",
+        snap.network.total_tx_bytes
+    );
 
-    let _ = writeln!(out, "# HELP nazar_network_connections Active TCP connections");
+    let _ = writeln!(
+        out,
+        "# HELP nazar_network_connections Active TCP connections"
+    );
     let _ = writeln!(out, "# TYPE nazar_network_connections gauge");
-    let _ = writeln!(out, "nazar_network_connections {}", snap.network.active_connections);
+    let _ = writeln!(
+        out,
+        "nazar_network_connections {}",
+        snap.network.active_connections
+    );
 
     // GPU
-    for g in &snap.gpu {
-        let _ = writeln!(out, "# HELP nazar_gpu_utilization_percent GPU utilization percentage");
+    if !snap.gpu.is_empty() {
+        let _ = writeln!(
+            out,
+            "# HELP nazar_gpu_utilization_percent GPU utilization percentage"
+        );
         let _ = writeln!(out, "# TYPE nazar_gpu_utilization_percent gauge");
-        let _ = writeln!(out, "nazar_gpu_utilization_percent{{id=\"{}\"}} {:.1}", g.id, g.utilization_percent);
-
-        let _ = writeln!(out, "# HELP nazar_gpu_vram_used_bytes GPU VRAM used in bytes");
+        let _ = writeln!(
+            out,
+            "# HELP nazar_gpu_vram_used_bytes GPU VRAM used in bytes"
+        );
         let _ = writeln!(out, "# TYPE nazar_gpu_vram_used_bytes gauge");
-        let _ = writeln!(out, "nazar_gpu_vram_used_bytes{{id=\"{}\"}} {}", g.id, g.vram_used_bytes);
-
-        let _ = writeln!(out, "# HELP nazar_gpu_vram_total_bytes GPU VRAM total in bytes");
+        let _ = writeln!(
+            out,
+            "# HELP nazar_gpu_vram_total_bytes GPU VRAM total in bytes"
+        );
         let _ = writeln!(out, "# TYPE nazar_gpu_vram_total_bytes gauge");
-        let _ = writeln!(out, "nazar_gpu_vram_total_bytes{{id=\"{}\"}} {}", g.id, g.vram_total_bytes);
-
-        if let Some(temp) = g.temp_celsius {
-            let _ = writeln!(out, "# HELP nazar_gpu_temperature_celsius GPU temperature");
-            let _ = writeln!(out, "# TYPE nazar_gpu_temperature_celsius gauge");
-            let _ = writeln!(out, "nazar_gpu_temperature_celsius{{id=\"{}\"}} {:.1}", g.id, temp);
+        let _ = writeln!(out, "# HELP nazar_gpu_temperature_celsius GPU temperature");
+        let _ = writeln!(out, "# TYPE nazar_gpu_temperature_celsius gauge");
+        for g in &snap.gpu {
+            let id = prom_escape(&g.id);
+            let _ = writeln!(
+                out,
+                "nazar_gpu_utilization_percent{{id=\"{id}\"}} {:.1}",
+                g.utilization_percent
+            );
+            let _ = writeln!(
+                out,
+                "nazar_gpu_vram_used_bytes{{id=\"{id}\"}} {}",
+                g.vram_used_bytes
+            );
+            let _ = writeln!(
+                out,
+                "nazar_gpu_vram_total_bytes{{id=\"{id}\"}} {}",
+                g.vram_total_bytes
+            );
+            if let Some(temp) = g.temp_celsius {
+                let _ = writeln!(
+                    out,
+                    "nazar_gpu_temperature_celsius{{id=\"{id}\"}} {:.1}",
+                    temp
+                );
+            }
         }
     }
 
     // Temperatures
-    let _ = writeln!(out, "# HELP nazar_temperature_celsius Sensor temperature in celsius");
+    let _ = writeln!(
+        out,
+        "# HELP nazar_temperature_celsius Sensor temperature in celsius"
+    );
     let _ = writeln!(out, "# TYPE nazar_temperature_celsius gauge");
     for t in &snap.temperatures {
-        let _ = writeln!(out, "nazar_temperature_celsius{{label=\"{}\"}} {:.1}", t.label, t.temp_celsius);
+        let _ = writeln!(
+            out,
+            "nazar_temperature_celsius{{label=\"{}\"}} {:.1}",
+            prom_escape(&t.label),
+            t.temp_celsius
+        );
     }
 
     // Alerts count
@@ -204,7 +311,10 @@ async fn api_prometheus(State(state): State<SharedState>) -> impl IntoResponse {
 
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
         out,
     )
 }
@@ -215,7 +325,10 @@ async fn api_mcp_call(
     Json(body): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
     let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let arguments = body.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+    let arguments = body
+        .get("arguments")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
     let result = nazar_mcp::execute_tool(name, &arguments, &state);
     Json(serde_json::json!({
         "content": [{"type": "text", "text": serde_json::to_string(&result.content).unwrap_or_default()}],

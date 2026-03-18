@@ -3,7 +3,27 @@
 use std::path::Path;
 
 use nazar_core::{Alert, PredictionResult, SystemSnapshot};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
+
+const SCHEMA_DDL: &str = "
+    CREATE TABLE IF NOT EXISTS snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        component TEXT NOT NULL,
+        message TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS predictions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        data TEXT NOT NULL
+    );
+";
 
 pub struct MetricStore {
     conn: Connection,
@@ -17,30 +37,11 @@ impl MetricStore {
                 .map_err(|e| format!("Failed to create DB directory: {e}"))?;
         }
 
-        let conn = Connection::open(path)
-            .map_err(|e| format!("Failed to open database: {e}"))?;
+        let conn = Connection::open(path).map_err(|e| format!("Failed to open database: {e}"))?;
 
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=NORMAL;
-             CREATE TABLE IF NOT EXISTS snapshots (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 timestamp TEXT NOT NULL,
-                 data TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS alerts (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 timestamp TEXT NOT NULL,
-                 severity TEXT NOT NULL,
-                 component TEXT NOT NULL,
-                 message TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS predictions (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 timestamp TEXT NOT NULL,
-                 data TEXT NOT NULL
-             );",
-        )
+        conn.execute_batch(&format!(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; {SCHEMA_DDL}"
+        ))
         .map_err(|e| format!("Failed to initialize schema: {e}"))?;
 
         Ok(Self { conn })
@@ -51,33 +52,14 @@ impl MetricStore {
         let conn = Connection::open_in_memory()
             .map_err(|e| format!("Failed to open in-memory database: {e}"))?;
 
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS snapshots (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 timestamp TEXT NOT NULL,
-                 data TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS alerts (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 timestamp TEXT NOT NULL,
-                 severity TEXT NOT NULL,
-                 component TEXT NOT NULL,
-                 message TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS predictions (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 timestamp TEXT NOT NULL,
-                 data TEXT NOT NULL
-             );",
-        )
-        .map_err(|e| format!("Failed to initialize schema: {e}"))?;
+        conn.execute_batch(SCHEMA_DDL)
+            .map_err(|e| format!("Failed to initialize schema: {e}"))?;
 
         Ok(Self { conn })
     }
 
     pub fn write_snapshot(&self, snapshot: &SystemSnapshot) -> Result<(), String> {
-        let json = serde_json::to_string(snapshot)
-            .map_err(|e| format!("Serialize error: {e}"))?;
+        let json = serde_json::to_string(snapshot).map_err(|e| format!("Serialize error: {e}"))?;
         self.conn
             .execute(
                 "INSERT INTO snapshots (timestamp, data) VALUES (?1, ?2)",
@@ -100,8 +82,8 @@ impl MetricStore {
     }
 
     pub fn write_predictions(&self, predictions: &[PredictionResult]) -> Result<(), String> {
-        let json = serde_json::to_string(predictions)
-            .map_err(|e| format!("Serialize error: {e}"))?;
+        let json =
+            serde_json::to_string(predictions).map_err(|e| format!("Serialize error: {e}"))?;
         let now = chrono::Utc::now().to_rfc3339();
         self.conn
             .execute(
@@ -113,7 +95,8 @@ impl MetricStore {
     }
 
     pub fn load_recent_snapshots(&self, n: usize) -> Result<Vec<SystemSnapshot>, String> {
-        let mut stmt = self.conn
+        let mut stmt = self
+            .conn
             .prepare("SELECT data FROM snapshots ORDER BY id DESC LIMIT ?1")
             .map_err(|e| format!("Query error: {e}"))?;
 
@@ -137,7 +120,8 @@ impl MetricStore {
         let cutoff_str = cutoff.to_rfc3339();
         let mut total = 0usize;
         for table in &["snapshots", "alerts", "predictions"] {
-            let deleted = self.conn
+            let deleted = self
+                .conn
                 .execute(
                     &format!("DELETE FROM {table} WHERE timestamp < ?1"),
                     params![cutoff_str],
@@ -203,12 +187,14 @@ mod tests {
     #[test]
     fn write_and_read_alerts() {
         let store = MetricStore::open_memory().unwrap();
-        store.write_alerts(&[Alert {
-            severity: AlertSeverity::Warning,
-            component: "cpu".to_string(),
-            message: "high".to_string(),
-            timestamp: chrono::Utc::now(),
-        }]).unwrap();
+        store
+            .write_alerts(&[Alert {
+                severity: AlertSeverity::Warning,
+                component: "cpu".to_string(),
+                message: "high".to_string(),
+                timestamp: chrono::Utc::now(),
+            }])
+            .unwrap();
     }
 
     #[test]
@@ -216,10 +202,13 @@ mod tests {
         let store = MetricStore::open_memory().unwrap();
         // Insert with old timestamp
         let old = chrono::Utc::now() - chrono::Duration::days(60);
-        store.conn.execute(
-            "INSERT INTO snapshots (timestamp, data) VALUES (?1, ?2)",
-            params![old.to_rfc3339(), "{}"],
-        ).unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO snapshots (timestamp, data) VALUES (?1, ?2)",
+                params![old.to_rfc3339(), "{}"],
+            )
+            .unwrap();
         store.write_snapshot(&test_snapshot()).unwrap();
 
         let deleted = store.prune_older_than(30).unwrap();

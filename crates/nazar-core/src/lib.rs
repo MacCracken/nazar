@@ -354,6 +354,7 @@ impl TimeSeries {
 
 /// Nazar configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NazarConfig {
     /// Daimon API URL.
     pub api_url: String,
@@ -422,8 +423,8 @@ impl NazarConfig {
 
     /// Save config to the default path. Creates parent directories if needed.
     pub fn save(&self) -> Result<(), String> {
-        let path = Self::config_path()
-            .ok_or_else(|| "Cannot determine config directory".to_string())?;
+        let path =
+            Self::config_path().ok_or_else(|| "Cannot determine config directory".to_string())?;
         self.save_to(&path)
     }
 
