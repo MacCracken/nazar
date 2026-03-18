@@ -1,6 +1,6 @@
 [package]
 name = "nazar-ui"
-version = "2026.3.17"
+version = "2026.3.18"
 edition = "2024"
 description = "GUI for Nazar system monitor (egui/eframe)"
 license = "GPL-3.0"

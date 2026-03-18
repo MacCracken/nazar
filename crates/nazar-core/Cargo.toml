@@ -1,6 +1,6 @@
 [package]
 name = "nazar-core"
-version = "2026.3.17"
+version = "2026.3.18"
 edition = "2024"
 description = "Core types and metrics for Nazar system monitor"
 license = "GPL-3.0"

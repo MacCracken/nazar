@@ -22,6 +22,10 @@ struct Cli {
     #[arg(long)]
     mcp: bool,
 
+    /// Run in TUI mode (terminal dashboard, like btop/htop)
+    #[arg(long)]
+    tui: bool,
+
     /// Bind address for nazar's HTTP API (use 0.0.0.0 for external access)
     #[arg(long, default_value = "127.0.0.1")]
     bind: String,
@@ -113,6 +117,20 @@ fn main() {
                 }
             }
         });
+        return;
+    }
+
+    if cli.tui {
+        tracing::info!("Starting TUI");
+        // Start HTTP API in background for TUI mode too
+        let api_state = Arc::clone(&state);
+        let bind = cli.bind.clone();
+        let port = cli.port;
+        rt.spawn(run_http_api(api_state, bind, port));
+
+        nazar_tui::run_tui(Arc::clone(&state)).expect("TUI failed");
+        tracing::info!("TUI closed, shutting down");
+        rt.shutdown_timeout(std::time::Duration::from_secs(2));
         return;
     }
 

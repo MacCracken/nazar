@@ -1,10 +1,12 @@
 [package]
-name = "nazar-ai"
+name = "nazar-tui"
 version = "2026.3.18"
 edition = "2024"
-description = "AI-powered analysis for Nazar system monitor"
+description = "Terminal UI for Nazar system monitor (ratatui)"
 license = "GPL-3.0"
 
 [dependencies]
 nazar-core = { path = "../nazar-core" }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
 chrono = { workspace = true }

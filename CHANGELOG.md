@@ -4,6 +4,23 @@ All notable changes to Nazar will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.3.18] - 2026-03-18
+
+### Added
+
+- **TUI mode** — terminal dashboard via `nazar --tui`, like btop/htop but for nazar
+  - **nazar-tui crate**: built on ratatui + crossterm for cross-platform terminal rendering
+  - Live-updating panels: CPU (gauge + sparkline + per-core bars), Memory (gauge + sparkline + swap), Disk (table with usage bars), Network (RX/TX sparklines + per-interface stats), GPU (utilization + VRAM gauges), Temperatures (color-coded readings)
+  - **AGNOS-aware layout**: auto-detects AGNOS (via agents/daimon service) and reorganizes layout to show Services + Agents panels alongside system metrics
+  - **Standard layout**: btop-style arrangement for non-AGNOS systems (CPU/Mem top, Disk/Net mid, GPU/Temps, tabbed bottom panel)
+  - **Tabbed bottom panel**: 6 tabs — Processes (sortable), Alerts (scrollable, severity-colored), Predictions (with trend indicators + confidence intervals), Agents (per-agent CPU/memory table), Services (state indicators + uptime), AI Insights (triage + recommendations)
+  - **Process table sorting**: cycle sort column (CPU/Mem/PID/Name) with `s`, reverse with `r`, visual sort indicators
+  - **Keyboard navigation**: `Tab`/`Shift+Tab` cycle tabs, `1-6` jump to tab, `Up/Down` scroll, `q`/`Esc` quit, `?` help overlay
+  - **Adaptive layout**: degrades gracefully on small terminals, collapses empty panels (no GPU, no temps)
+  - **Reuses SharedState**: same collector feeds GUI, TUI, headless, and MCP modes — zero data duplication
+  - HTTP API runs in background during TUI mode
+- **`--tui` CLI flag** for launching terminal dashboard mode
+
 ## [2026.3.17] - 2026-03-17
 
 ### Added
