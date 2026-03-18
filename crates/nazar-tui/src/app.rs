@@ -153,13 +153,19 @@ impl TuiApp {
     }
 
     pub fn next_tab(&mut self) {
-        let idx = Tab::ALL.iter().position(|&t| t == self.active_tab).unwrap_or(0);
+        let idx = Tab::ALL
+            .iter()
+            .position(|&t| t == self.active_tab)
+            .unwrap_or(0);
         self.active_tab = Tab::ALL[(idx + 1) % Tab::ALL.len()];
         self.scroll_offset = 0;
     }
 
     pub fn prev_tab(&mut self) {
-        let idx = Tab::ALL.iter().position(|&t| t == self.active_tab).unwrap_or(0);
+        let idx = Tab::ALL
+            .iter()
+            .position(|&t| t == self.active_tab)
+            .unwrap_or(0);
         self.active_tab = Tab::ALL[(idx + Tab::ALL.len() - 1) % Tab::ALL.len()];
         self.scroll_offset = 0;
     }
@@ -189,7 +195,11 @@ impl TuiApp {
                 ProcessSort::Pid => a.pid.cmp(&b.pid),
                 ProcessSort::Name => a.name.cmp(&b.name),
             };
-            if self.sort_reverse { cmp.reverse() } else { cmp }
+            if self.sort_reverse {
+                cmp.reverse()
+            } else {
+                cmp
+            }
         });
         sorted
     }

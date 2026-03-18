@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Row, Table};
-use ratatui::Frame;
 
 use nazar_core::ProcessInfo;
 
@@ -24,13 +24,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp, procs: &[ProcessInfo]
         .border_style(Style::default().fg(Color::DarkGray));
 
     let widths = [
-        ratatui::layout::Constraint::Length(7),   // PID
-        ratatui::layout::Constraint::Min(14),     // Name
-        ratatui::layout::Constraint::Length(7),   // CPU%
-        ratatui::layout::Constraint::Length(10),  // Memory
-        ratatui::layout::Constraint::Length(6),   // Mem%
-        ratatui::layout::Constraint::Length(3),   // St
-        ratatui::layout::Constraint::Length(5),   // Thr
+        ratatui::layout::Constraint::Length(7),  // PID
+        ratatui::layout::Constraint::Min(14),    // Name
+        ratatui::layout::Constraint::Length(7),  // CPU%
+        ratatui::layout::Constraint::Length(10), // Memory
+        ratatui::layout::Constraint::Length(6),  // Mem%
+        ratatui::layout::Constraint::Length(3),  // St
+        ratatui::layout::Constraint::Length(5),  // Thr
     ];
 
     let header_style = Style::default()

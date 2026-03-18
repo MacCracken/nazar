@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Row, Table};
-use ratatui::Frame;
 
 use nazar_core::DiskMetrics;
 
@@ -18,7 +18,10 @@ fn usage_color(pct: f64) -> Color {
 
 pub fn render(frame: &mut Frame, area: Rect, disks: &[DiskMetrics]) {
     let block = Block::default()
-        .title(Span::styled(" Disk ", Style::default().add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " Disk ",
+            Style::default().add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
 
@@ -28,22 +31,29 @@ pub fn render(frame: &mut Frame, area: Rect, disks: &[DiskMetrics]) {
     }
 
     let widths = [
-        ratatui::layout::Constraint::Length(12),  // mount
-        ratatui::layout::Constraint::Length(10),  // device
-        ratatui::layout::Constraint::Length(12),  // used/total
-        ratatui::layout::Constraint::Length(6),   // pct
-        ratatui::layout::Constraint::Min(10),     // bar
+        ratatui::layout::Constraint::Length(12), // mount
+        ratatui::layout::Constraint::Length(10), // device
+        ratatui::layout::Constraint::Length(12), // used/total
+        ratatui::layout::Constraint::Length(6),  // pct
+        ratatui::layout::Constraint::Min(10),    // bar
     ];
 
-    let header = Row::new(vec!["Mount", "Device", "Used/Total", "%", ""])
-        .style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan));
+    let header = Row::new(vec!["Mount", "Device", "Used/Total", "%", ""]).style(
+        Style::default()
+            .add_modifier(Modifier::BOLD)
+            .fg(Color::Cyan),
+    );
 
     let rows: Vec<Row> = disks
         .iter()
         .map(|d| {
             let pct = d.used_percent();
             let color = usage_color(pct);
-            let used = format!("{:.1}G/{:.1}G", d.used_bytes as f64 / 1e9, d.total_bytes as f64 / 1e9);
+            let used = format!(
+                "{:.1}G/{:.1}G",
+                d.used_bytes as f64 / 1e9,
+                d.total_bytes as f64 / 1e9
+            );
             let pct_str = format!("{:.1}%", pct);
 
             // Simple text-based bar
@@ -62,9 +72,7 @@ pub fn render(frame: &mut Frame, area: Rect, disks: &[DiskMetrics]) {
         })
         .collect();
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(block);
+    let table = Table::new(rows, widths).header(header).block(block);
 
     frame.render_widget(table, area);
 }

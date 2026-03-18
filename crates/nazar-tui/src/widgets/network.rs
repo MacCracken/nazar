@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Sparkline};
-use ratatui::Frame;
 
 use nazar_core::NetworkMetrics;
 
@@ -68,7 +68,10 @@ pub fn render(
             .max(100)
             .style(Style::default().fg(Color::Green))
             .bar_set(symbols::bar::NINE_LEVELS);
-        let rx_area = Rect { height: 1, ..chunks[0] };
+        let rx_area = Rect {
+            height: 1,
+            ..chunks[0]
+        };
         frame.render_widget(spark, rx_area);
     }
 

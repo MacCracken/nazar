@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use nazar_core::{PredictionResult, Trend};
 
@@ -19,8 +19,7 @@ pub fn render(frame: &mut Frame, area: Rect, predictions: &[PredictionResult], p
     frame.render_widget(block, area);
 
     if predictions.is_empty() {
-        let p = Paragraph::new("  No predictions yet")
-            .style(Style::default().fg(Color::DarkGray));
+        let p = Paragraph::new("  No predictions yet").style(Style::default().fg(Color::DarkGray));
         frame.render_widget(p, inner);
         return;
     }
@@ -41,7 +40,10 @@ pub fn render(frame: &mut Frame, area: Rect, predictions: &[PredictionResult], p
             };
 
             let mut spans = vec![
-                Span::styled(format!("  {}: ", pred.metric), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("  {}: ", pred.metric),
+                    Style::default().fg(Color::White),
+                ),
                 Span::styled(
                     format!("{:.1}%", pred.current_value),
                     Style::default().fg(Color::Cyan),
@@ -55,10 +57,7 @@ pub fn render(frame: &mut Frame, area: Rect, predictions: &[PredictionResult], p
                     format!(" in ~{mins}min "),
                     Style::default().fg(Color::DarkGray),
                 ),
-                Span::styled(
-                    format!("[{trend_icon}]"),
-                    Style::default().fg(trend_color),
-                ),
+                Span::styled(format!("[{trend_icon}]"), Style::default().fg(trend_color)),
             ];
 
             if let (Some(lo), Some(hi)) = (pred.confidence_low, pred.confidence_high) {

@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use nazar_core::{ServiceState, ServiceStatus};
 
@@ -43,10 +43,7 @@ pub fn render(frame: &mut Frame, area: Rect, services: &[ServiceStatus]) {
                     format!("{:<12} ", svc.name),
                     Style::default().fg(Color::White),
                 ),
-                Span::styled(
-                    format!("{:<8}", svc.state),
-                    Style::default().fg(icon_color),
-                ),
+                Span::styled(format!("{:<8}", svc.state), Style::default().fg(icon_color)),
             ];
 
             if let Some(port) = svc.port {

@@ -7,11 +7,11 @@ use std::io;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::Terminal;
 
 use nazar_core::SharedState;
 
@@ -52,31 +52,49 @@ fn run_loop(
         })?;
 
         // Poll for events with timeout matching refresh rate
-        if event::poll(Duration::from_millis(app.refresh_ms))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Char('?') => app.show_help = !app.show_help,
-                    KeyCode::Tab => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            app.prev_tab();
-                        } else {
-                            app.next_tab();
-                        }
+        if event::poll(Duration::from_millis(app.refresh_ms))?
+            && let Event::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                KeyCode::Char('?') => app.show_help = !app.show_help,
+                KeyCode::Tab => {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        app.prev_tab();
+                    } else {
+                        app.next_tab();
                     }
-                    KeyCode::BackTab => app.prev_tab(),
-                    KeyCode::Char('1') => { app.active_tab = Tab::Processes; app.scroll_offset = 0; }
-                    KeyCode::Char('2') => { app.active_tab = Tab::Alerts; app.scroll_offset = 0; }
-                    KeyCode::Char('3') => { app.active_tab = Tab::Predictions; app.scroll_offset = 0; }
-                    KeyCode::Char('4') => { app.active_tab = Tab::Agents; app.scroll_offset = 0; }
-                    KeyCode::Char('5') => { app.active_tab = Tab::Services; app.scroll_offset = 0; }
-                    KeyCode::Char('6') => { app.active_tab = Tab::Insights; app.scroll_offset = 0; }
-                    KeyCode::Up => app.scroll_up(),
-                    KeyCode::Down => app.scroll_down(),
-                    KeyCode::Char('s') => app.cycle_sort(),
-                    KeyCode::Char('r') => app.toggle_sort_order(),
-                    _ => {}
                 }
+                KeyCode::BackTab => app.prev_tab(),
+                KeyCode::Char('1') => {
+                    app.active_tab = Tab::Processes;
+                    app.scroll_offset = 0;
+                }
+                KeyCode::Char('2') => {
+                    app.active_tab = Tab::Alerts;
+                    app.scroll_offset = 0;
+                }
+                KeyCode::Char('3') => {
+                    app.active_tab = Tab::Predictions;
+                    app.scroll_offset = 0;
+                }
+                KeyCode::Char('4') => {
+                    app.active_tab = Tab::Agents;
+                    app.scroll_offset = 0;
+                }
+                KeyCode::Char('5') => {
+                    app.active_tab = Tab::Services;
+                    app.scroll_offset = 0;
+                }
+                KeyCode::Char('6') => {
+                    app.active_tab = Tab::Insights;
+                    app.scroll_offset = 0;
+                }
+                KeyCode::Up => app.scroll_up(),
+                KeyCode::Down => app.scroll_down(),
+                KeyCode::Char('s') => app.cycle_sort(),
+                KeyCode::Char('r') => app.toggle_sort_order(),
+                _ => {}
             }
         }
     }
@@ -134,10 +152,10 @@ fn render_standard_layout(
     let mid2_height = if has_gpu || has_temps { 6 } else { 0 };
 
     let constraints = vec![
-        Constraint::Length(8),       // CPU + Memory
-        Constraint::Length(8),       // Disk + Network
+        Constraint::Length(8),           // CPU + Memory
+        Constraint::Length(8),           // Disk + Network
         Constraint::Length(mid2_height), // GPU + Temps
-        Constraint::Min(6),          // Tab panel
+        Constraint::Min(6),              // Tab panel
     ];
 
     let chunks = Layout::vertical(constraints).split(area);
@@ -177,7 +195,11 @@ fn render_standard_layout(
     }
 
     // Row 4: Active tab
-    let tab_area = if mid2_height > 0 { chunks[3] } else { chunks[2] };
+    let tab_area = if mid2_height > 0 {
+        chunks[3]
+    } else {
+        chunks[2]
+    };
     render_tab_panel(frame, tab_area, app, data, snap);
 }
 
@@ -192,9 +214,9 @@ fn render_agnos_layout(
     // Mid: Disk+Network | Services+Agents
     // Bottom: active tab panel
     let constraints = vec![
-        Constraint::Length(8),   // CPU + Memory
-        Constraint::Length(10),  // Disk+Net | Services+Agents
-        Constraint::Min(6),      // Tab panel
+        Constraint::Length(8),  // CPU + Memory
+        Constraint::Length(10), // Disk+Net | Services+Agents
+        Constraint::Min(6),     // Tab panel
     ];
 
     let chunks = Layout::vertical(constraints).split(area);

@@ -1,9 +1,9 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Sparkline};
-use ratatui::Frame;
 
 use nazar_core::CpuMetrics;
 
@@ -47,22 +47,19 @@ pub fn render(frame: &mut Frame, area: Rect, cpu: &CpuMetrics, history: &[f64]) 
     let has_cores = !cpu.cores.is_empty();
     let core_rows = if has_cores {
         // 1 row for every 8 cores
-        ((cpu.cores.len() + 7) / 8).min(3) as u16
+        cpu.cores.len().div_ceil(8).min(3) as u16
     } else {
         0
     };
 
     let constraints: Vec<Constraint> = if inner.height > 3 + core_rows {
         vec![
-            Constraint::Length(1),                              // gauge
-            Constraint::Min(2),                                 // sparkline
-            Constraint::Length(core_rows.max(1)),                // cores
+            Constraint::Length(1),                // gauge
+            Constraint::Min(2),                   // sparkline
+            Constraint::Length(core_rows.max(1)), // cores
         ]
     } else {
-        vec![
-            Constraint::Length(1),
-            Constraint::Min(1),
-        ]
+        vec![Constraint::Length(1), Constraint::Min(1)]
     };
 
     let chunks = Layout::vertical(constraints).split(inner);

@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::app::{FrameData, Tab, TuiApp};
 
@@ -29,7 +29,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp, data: &FrameData) {
         .collect();
 
     let mut spans = vec![
-        Span::styled(" NAZAR ", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " NAZAR ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
         agnos_tag,
         Span::raw(" "),
@@ -46,7 +52,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp, data: &FrameData) {
     ];
     spans.extend(tabs);
     spans.push(Span::raw(" | "));
-    spans.push(Span::styled("q:quit ?:help", Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(
+        "q:quit ?:help",
+        Style::default().fg(Color::DarkGray),
+    ));
 
     let header = Paragraph::new(Line::from(spans));
     frame.render_widget(header, area);

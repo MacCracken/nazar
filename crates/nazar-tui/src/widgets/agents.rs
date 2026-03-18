@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Row, Table};
-use ratatui::Frame;
 
 use nazar_core::AgentSummary;
 
@@ -42,12 +42,15 @@ pub fn render(frame: &mut Frame, area: Rect, agents: &AgentSummary) {
 
     let widths = [
         ratatui::layout::Constraint::Min(14),    // Agent
-        ratatui::layout::Constraint::Length(8),   // CPU%
-        ratatui::layout::Constraint::Length(12),  // Memory
+        ratatui::layout::Constraint::Length(8),  // CPU%
+        ratatui::layout::Constraint::Length(12), // Memory
     ];
 
-    let header = Row::new(vec!["Agent", "CPU%", "Memory"])
-        .style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan));
+    let header = Row::new(vec!["Agent", "CPU%", "Memory"]).style(
+        Style::default()
+            .add_modifier(Modifier::BOLD)
+            .fg(Color::Cyan),
+    );
 
     let rows: Vec<Row> = agent_ids
         .iter()

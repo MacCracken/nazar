@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 
 pub fn render(
     frame: &mut Frame,
@@ -48,7 +48,11 @@ pub fn render(
     }
 
     if let Some(r) = recommendations {
-        let target = if chunk_idx < chunks.len() { chunk_idx } else { 0 };
+        let target = if chunk_idx < chunks.len() {
+            chunk_idx
+        } else {
+            0
+        };
         let p = Paragraph::new(format!("  Recommendations: {r}"))
             .style(Style::default().fg(Color::Cyan))
             .wrap(Wrap { trim: true });

@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use nazar_core::{Alert, AlertSeverity};
 
@@ -19,8 +19,7 @@ pub fn render(frame: &mut Frame, area: Rect, alerts: &[Alert], scroll: u16) {
     frame.render_widget(block, area);
 
     if alerts.is_empty() {
-        let p = Paragraph::new("  No active alerts")
-            .style(Style::default().fg(Color::DarkGray));
+        let p = Paragraph::new("  No active alerts").style(Style::default().fg(Color::DarkGray));
         frame.render_widget(p, inner);
         return;
     }
@@ -53,14 +52,8 @@ pub fn render(frame: &mut Frame, area: Rect, alerts: &[Alert], scroll: u16) {
                     format!("{}: ", alert.component),
                     Style::default().fg(Color::White),
                 ),
-                Span::styled(
-                    alert.message.clone(),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    format!("  {age_str}"),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(alert.message.clone(), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("  {age_str}"), Style::default().fg(Color::DarkGray)),
             ])
         })
         .collect();

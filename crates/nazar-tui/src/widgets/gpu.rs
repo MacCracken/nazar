@@ -1,14 +1,17 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
-use ratatui::Frame;
 
 use nazar_core::GpuMetrics;
 
 pub fn render(frame: &mut Frame, area: Rect, gpus: &[GpuMetrics]) {
     let block = Block::default()
-        .title(Span::styled(" GPU ", Style::default().add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " GPU ",
+            Style::default().add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
 
@@ -69,7 +72,11 @@ pub fn render(frame: &mut Frame, area: Rect, gpus: &[GpuMetrics]) {
         let gauge = Gauge::default()
             .gauge_style(Style::default().fg(color).bg(Color::DarkGray))
             .ratio((g.utilization_percent / 100.0).clamp(0.0, 1.0))
-            .label(format!("GPU {:.0}%  VRAM {:.1}%", g.utilization_percent, g.vram_used_percent()));
+            .label(format!(
+                "GPU {:.0}%  VRAM {:.1}%",
+                g.utilization_percent,
+                g.vram_used_percent()
+            ));
         frame.render_widget(gauge, chunks[gauge_idx]);
     }
 }
