@@ -297,6 +297,12 @@ pub struct NazarConfig {
     pub show_agents: bool,
     /// Refresh rate for the UI (ms).
     pub ui_refresh_ms: u64,
+    /// CPU usage threshold for anomaly alerts (0.0–100.0).
+    pub cpu_threshold: f64,
+    /// Memory usage threshold for anomaly alerts (0.0–100.0).
+    pub memory_threshold: f64,
+    /// Disk usage threshold for anomaly alerts (0.0–100.0).
+    pub disk_threshold: f64,
 }
 
 impl Default for NazarConfig {
@@ -308,6 +314,9 @@ impl Default for NazarConfig {
             show_anomalies: true,
             show_agents: true,
             ui_refresh_ms: 1000,
+            cpu_threshold: 90.0,
+            memory_threshold: 85.0,
+            disk_threshold: 90.0,
         }
     }
 }
@@ -362,6 +371,22 @@ pub type SharedState = Arc<RwLock<MonitorState>>;
 
 pub fn new_shared_state(config: NazarConfig) -> SharedState {
     Arc::new(RwLock::new(MonitorState::new(config)))
+}
+
+/// Read from shared state, recovering from a poisoned lock instead of panicking.
+pub fn read_state(state: &SharedState) -> std::sync::RwLockReadGuard<'_, MonitorState> {
+    state.read().unwrap_or_else(|poisoned| {
+        tracing::warn!("Recovered from poisoned RwLock (read)");
+        poisoned.into_inner()
+    })
+}
+
+/// Write to shared state, recovering from a poisoned lock instead of panicking.
+pub fn write_state(state: &SharedState) -> std::sync::RwLockWriteGuard<'_, MonitorState> {
+    state.write().unwrap_or_else(|poisoned| {
+        tracing::warn!("Recovered from poisoned RwLock (write)");
+        poisoned.into_inner()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +494,9 @@ mod tests {
         assert_eq!(cfg.poll_interval_secs, 5);
         assert_eq!(cfg.max_history_points, 720);
         assert!(cfg.show_anomalies);
+        assert!((cfg.cpu_threshold - 90.0).abs() < f64::EPSILON);
+        assert!((cfg.memory_threshold - 85.0).abs() < f64::EPSILON);
+        assert!((cfg.disk_threshold - 90.0).abs() < f64::EPSILON);
     }
 
     #[test]

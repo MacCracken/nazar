@@ -28,7 +28,7 @@ egui_plot = "0.34"
 
 [package]
 name = "nazar"
-version = "2026.3.16"
+version = "2026.3.17"
 edition = "2024"
 description = "AI-native system monitor for AGNOS"
 license = "GPL-3.0"

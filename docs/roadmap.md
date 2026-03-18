@@ -1,6 +1,6 @@
 # Nazar Development Roadmap
 
-> **Status**: v1 MVP in progress | **Version**: 2026.3.16
+> **Status**: v1 MVP complete | **Version**: 2026.3.17
 
 ---
 
@@ -56,7 +56,7 @@ an HTTP API and MCP tools.
 | 20 | Network panel | **Done** | Per-interface rx/tx with error counts |
 | 21 | Alerts panel | **Done** | Bottom panel with severity-colored alert list |
 | 22 | Time series charts | **Done** | egui_plot sparklines for CPU and memory history |
-| 23 | Service status (live) | Not started | Replace placeholder with real daimon health checks |
+| 23 | Service status (live) | **Done** | Probes daimon/hoosh health endpoints every ~30s |
 
 ---
 

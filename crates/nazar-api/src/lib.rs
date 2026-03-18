@@ -1,8 +1,10 @@
 //! Nazar API — Daimon HTTP client and /proc-based system metric readers.
 
 mod proc_reader;
+mod service_checker;
 
 pub use proc_reader::ProcReader;
+pub use service_checker::check_services;
 
 /// Client for the AGNOS daimon API.
 pub struct ApiClient {

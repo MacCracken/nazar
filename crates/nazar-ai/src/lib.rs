@@ -23,6 +23,17 @@ impl AnomalyDetector {
         }
     }
 
+    /// Create a detector with thresholds from NazarConfig.
+    pub fn from_config(config: &NazarConfig) -> Self {
+        Self {
+            cpu_threshold: config.cpu_threshold,
+            memory_threshold: config.memory_threshold,
+            disk_threshold: config.disk_threshold,
+            history: Vec::new(),
+            max_history: 100,
+        }
+    }
+
     pub fn set_thresholds(&mut self, cpu: f64, memory: f64, disk: f64) {
         self.cpu_threshold = cpu;
         self.memory_threshold = memory;

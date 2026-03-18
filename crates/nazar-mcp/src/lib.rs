@@ -112,7 +112,7 @@ pub fn execute_tool(
 }
 
 fn handle_dashboard(state: &SharedState) -> ToolResult {
-    let s = state.read().unwrap();
+    let s = read_state(state);
     match &s.latest {
         Some(snap) => ToolResult::ok(serde_json::json!({
             "timestamp": snap.timestamp.to_rfc3339(),
@@ -149,7 +149,7 @@ fn handle_dashboard(state: &SharedState) -> ToolResult {
 }
 
 fn handle_alerts(params: &serde_json::Value, state: &SharedState) -> ToolResult {
-    let s = state.read().unwrap();
+    let s = read_state(state);
     let severity_filter = params.get("severity").and_then(|v| v.as_str());
 
     let alerts: Vec<_> = s
@@ -182,7 +182,7 @@ fn handle_alerts(params: &serde_json::Value, state: &SharedState) -> ToolResult 
 }
 
 fn handle_predict(_params: &serde_json::Value, state: &SharedState) -> ToolResult {
-    let s = state.read().unwrap();
+    let s = read_state(state);
     if s.predictions.is_empty() {
         return ToolResult::ok(serde_json::json!({
             "message": "Not enough data for predictions (need 10+ samples)",
@@ -211,7 +211,7 @@ fn handle_predict(_params: &serde_json::Value, state: &SharedState) -> ToolResul
 }
 
 fn handle_history(params: &serde_json::Value, state: &SharedState) -> ToolResult {
-    let s = state.read().unwrap();
+    let s = read_state(state);
     let metric = match params.get("metric").and_then(|v| v.as_str()) {
         Some(m) => m,
         None => return ToolResult::err("'metric' parameter is required"),
@@ -291,7 +291,7 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
 
     match action {
         "get" => {
-            let s = state.read().unwrap();
+            let s = read_state(state);
             ToolResult::ok(serde_json::json!({
                 "api_url": s.config.api_url,
                 "poll_interval_secs": s.config.poll_interval_secs,
@@ -299,6 +299,9 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
                 "show_anomalies": s.config.show_anomalies,
                 "show_agents": s.config.show_agents,
                 "ui_refresh_ms": s.config.ui_refresh_ms,
+                "cpu_threshold": s.config.cpu_threshold,
+                "memory_threshold": s.config.memory_threshold,
+                "disk_threshold": s.config.disk_threshold,
             }))
         }
         "set" => {
@@ -306,7 +309,7 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
             let value = params.get("value").and_then(|v| v.as_str());
             match (key, value) {
                 (Some(k), Some(v)) => {
-                    let mut s = state.write().unwrap();
+                    let mut s = write_state(state);
                     match k {
                         "poll_interval_secs" => {
                             if let Ok(n) = v.parse::<u64>() {
@@ -326,6 +329,18 @@ fn handle_config(params: &serde_json::Value, state: &SharedState) -> ToolResult 
                                 s.config.ui_refresh_ms = n;
                             } else {
                                 return ToolResult::err("Invalid value for ui_refresh_ms");
+                            }
+                        }
+                        "cpu_threshold" | "memory_threshold" | "disk_threshold" => {
+                            if let Ok(n) = v.parse::<f64>() {
+                                match k {
+                                    "cpu_threshold" => s.config.cpu_threshold = n,
+                                    "memory_threshold" => s.config.memory_threshold = n,
+                                    "disk_threshold" => s.config.disk_threshold = n,
+                                    _ => unreachable!(),
+                                }
+                            } else {
+                                return ToolResult::err(&format!("Invalid value for {k}"));
                             }
                         }
                         _ => return ToolResult::err(&format!("Unknown config key: {k}")),
