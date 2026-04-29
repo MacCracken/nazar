@@ -7,6 +7,7 @@ license = "GPL-3.0"
 
 [dependencies]
 nazar-core = { path = "../nazar-core" }
+bote = { path = "../../../bote" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

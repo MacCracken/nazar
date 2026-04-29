@@ -4,16 +4,11 @@
 
 pub mod transport;
 
+use std::collections::HashMap;
+
+use bote::{ToolDef, ToolSchema};
 use nazar_core::*;
 use serde::{Deserialize, Serialize};
-
-/// MCP tool description (matches daimon's schema).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolDescription {
-    pub name: String,
-    pub description: String,
-    pub input_schema: serde_json::Value,
-}
 
 /// Result from executing an MCP tool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,71 +40,66 @@ pub fn tool_registrations() -> Vec<nazar_core::ToolRegistration> {
         .map(|t| nazar_core::ToolRegistration {
             name: t.name,
             description: t.description,
-            input_schema: t.input_schema,
+            input_schema: serde_json::to_value(&t.input_schema).unwrap_or_default(),
         })
         .collect()
 }
 
 /// Get the 5 Nazar MCP tool definitions.
-pub fn tool_definitions() -> Vec<ToolDescription> {
+pub fn tool_definitions() -> Vec<ToolDef> {
     vec![
-        ToolDescription {
-            name: "nazar_dashboard".to_string(),
-            description: "Get a system monitoring dashboard snapshot (CPU, memory, disk, agents)"
-                .to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "required": []
-            }),
-        },
-        ToolDescription {
-            name: "nazar_alerts".to_string(),
-            description: "Get current system anomaly alerts and warnings".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "severity": {"type": "string", "description": "Filter by severity: info, warning, critical"}
-                },
-                "required": []
-            }),
-        },
-        ToolDescription {
-            name: "nazar_predict".to_string(),
-            description: "Predict resource exhaustion based on current trends".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "metric": {"type": "string", "description": "Metric to predict: memory, disk, cpu"}
-                },
-                "required": []
-            }),
-        },
-        ToolDescription {
-            name: "nazar_history".to_string(),
-            description: "Get historical metrics for a specific resource".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "metric": {"type": "string", "description": "Metric: cpu, memory, network_rx, network_tx, or disk:<mount_point>"},
-                    "points": {"type": "integer", "description": "Number of data points (default: 60)"}
-                },
-                "required": ["metric"]
-            }),
-        },
-        ToolDescription {
-            name: "nazar_config".to_string(),
-            description: "Get or update Nazar monitor configuration".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "description": "Action: get or set"},
-                    "key": {"type": "string", "description": "Config key"},
-                    "value": {"type": "string", "description": "Config value (for set)"}
-                },
-                "required": ["action"]
-            }),
-        },
+        ToolDef::new(
+            "nazar_dashboard",
+            "Get a system monitoring dashboard snapshot (CPU, memory, disk, agents)",
+            ToolSchema::new("object", HashMap::new(), vec![]),
+        ),
+        ToolDef::new(
+            "nazar_alerts",
+            "Get current system anomaly alerts and warnings",
+            ToolSchema::new(
+                "object",
+                HashMap::from([
+                    ("severity".into(), serde_json::json!({"type": "string", "description": "Filter by severity: info, warning, critical"})),
+                ]),
+                vec![],
+            ),
+        ),
+        ToolDef::new(
+            "nazar_predict",
+            "Predict resource exhaustion based on current trends",
+            ToolSchema::new(
+                "object",
+                HashMap::from([
+                    ("metric".into(), serde_json::json!({"type": "string", "description": "Metric to predict: memory, disk, cpu"})),
+                ]),
+                vec![],
+            ),
+        ),
+        ToolDef::new(
+            "nazar_history",
+            "Get historical metrics for a specific resource",
+            ToolSchema::new(
+                "object",
+                HashMap::from([
+                    ("metric".into(), serde_json::json!({"type": "string", "description": "Metric: cpu, memory, network_rx, network_tx, or disk:<mount_point>"})),
+                    ("points".into(), serde_json::json!({"type": "integer", "description": "Number of data points (default: 60)"})),
+                ]),
+                vec!["metric".into()],
+            ),
+        ),
+        ToolDef::new(
+            "nazar_config",
+            "Get or update Nazar monitor configuration",
+            ToolSchema::new(
+                "object",
+                HashMap::from([
+                    ("action".into(), serde_json::json!({"type": "string", "description": "Action: get or set"})),
+                    ("key".into(), serde_json::json!({"type": "string", "description": "Config key"})),
+                    ("value".into(), serde_json::json!({"type": "string", "description": "Config value (for set)"})),
+                ]),
+                vec!["action".into()],
+            ),
+        ),
     ]
 }
 
@@ -441,7 +431,7 @@ mod tests {
     #[test]
     fn tool_schemas_valid_json() {
         for tool in tool_definitions() {
-            assert!(tool.input_schema.is_object());
+            assert_eq!(tool.input_schema.schema_type, "object");
         }
     }
 

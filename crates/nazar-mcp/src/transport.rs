@@ -83,7 +83,7 @@ fn handle_tools_list() -> serde_json::Value {
             json!({
                 "name": t.name,
                 "description": t.description,
-                "inputSchema": t.input_schema,
+                "inputSchema": serde_json::to_value(&t.input_schema).unwrap_or_default(),
             })
         })
         .collect();
